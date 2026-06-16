@@ -1,0 +1,16 @@
+# PlatformIO 构建文件
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# VS Code / 编辑器缓存与配置文件
+.vscode/
+.clang_complete
+.gcc-flags.json
+.clangd/
+compile_commands.json
+
+# 系统或临时文件
+*.log
+.DS_Store
+Thumbs.db
