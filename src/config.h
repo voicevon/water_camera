@@ -10,11 +10,19 @@
 #define MQTT_PORT       1883
 
 // -------- MQTT Topic 配置 --------
-#define MQTT_CMD_TOPIC  "water/camera/cmd"
-#define MQTT_DATA_TOPIC "water/camera/data"
+#define MQTT_CMD_TOPIC  "water/dongzhan/camera/cmd"
+#define MQTT_DATA_TOPIC "water/dongzhan/camera/status"
 
 // MQTT 非阻塞重连最小间隔（毫秒）
 #define MQTT_RECONNECT_INTERVAL_MS  5000UL
+
+// -------- 闪光灯引脚配置 --------
+#define FLASH_GPIO_NUM    4
+
+// -------- LED 指示灯引脚配置 --------
+#define STATUS_LED_GPIO_NUM  33   // 板载红色指示灯 (低电平有效)
+#define STATUS_LED_ON        LOW
+#define STATUS_LED_OFF       HIGH
 
 // -------- AI-Thinker ESP32-CAM 摄像头引脚定义 --------
 #define PWDN_GPIO_NUM     32
