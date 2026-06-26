@@ -1,6 +1,54 @@
 #include "network_handler.h"
 #include <Arduino.h>
+#include <HTTPClient.h>
 #include "config.h"
+
+// 备用 DNS 解析：结合标准 DNS 与 HTTP-DNS，绕过本地代理劫持 (Fake-IP)
+static IPAddress resolve_broker_ip() {
+    IPAddress resolvedIP;
+    
+    // 1. 尝试使用标准的 DNS 解析
+    if (WiFi.hostByName(MQTT_BROKER, resolvedIP)) {
+        // 如果解析出来的 IP 属于 Clash 的 Fake-IP 范围 (198.18.x.x)，说明被本地代理劫持且 ESP32 无法直接路由
+        if (resolvedIP[0] == 198 && resolvedIP[1] == 18) {
+            Serial.printf("[DNS] Resolved to Fake-IP %s, bypassing...\n", resolvedIP.toString().c_str());
+        } else {
+            Serial.printf("[DNS] Successfully resolved %s to %s via standard DNS\n", MQTT_BROKER, resolvedIP.toString().c_str());
+            return resolvedIP;
+        }
+    } else {
+        Serial.printf("[DNS] Standard DNS failed for %s\n", MQTT_BROKER);
+    }
+    
+    // 2. 备用方案：使用 HTTP-DNS (通过 TCP 80 端口直接查询 223.5.5.5，绕过本地 53 端口 DNS 劫持)
+    Serial.println("[DNS] Attempting HTTP-DNS resolution via AliDNS...");
+    HTTPClient http;
+    String url = "http://223.5.5.5/resolve?name=" + String(MQTT_BROKER) + "&type=A";
+    http.begin(url);
+    http.setTimeout(3000); // 3 秒超时
+    
+    int httpCode = http.GET();
+    if (httpCode == HTTP_CODE_OK) {
+        String payload = http.getString();
+        int index = payload.indexOf("\"data\":\"");
+        if (index != -1) {
+            int start = index + 8;
+            int end = payload.indexOf("\"", start);
+            if (end != -1) {
+                String ipStr = payload.substring(start, end);
+                if (resolvedIP.fromString(ipStr.c_str())) {
+                    Serial.printf("[DNS] HTTP-DNS successfully resolved %s to %s\n", MQTT_BROKER, resolvedIP.toString().c_str());
+                    return resolvedIP;
+                }
+            }
+        }
+    } else {
+        Serial.printf("[DNS] HTTP-DNS request failed, HTTP Code: %d\n", httpCode);
+    }
+    http.end();
+    
+    return IPAddress(0, 0, 0, 0);
+}
 
 // 实例化全局单例
 NetworkHandler network;
@@ -65,15 +113,23 @@ NetworkHandler::NetworkHandler() : _mqttClient(_espClient), _lastReconnectTime(0
 
 void NetworkHandler::init() {
     _wifiInit();
-    _mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+    
+    // 动态解析 MQTT Broker 的 IP，以应对本地 DNS 劫持或 DDNS IP 发生变更的问题
+    IPAddress brokerIP = resolve_broker_ip();
+    if (brokerIP[0] != 0) {
+        _mqttClient.setServer(brokerIP, MQTT_PORT);
+        Serial.printf("[MQTT] Server set to resolved IP: %s:%d\n", brokerIP.toString().c_str(), MQTT_PORT);
+    } else {
+        _mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+        Serial.printf("[MQTT] DNS resolution failed, fallback to domain: %s:%d\n", MQTT_BROKER, MQTT_PORT);
+    }
 
-    // PSRAM 现在已由框架初始化完毕，重新申请 MQTT 缓冲区以支持传输大图
-    if (!_mqttClient.setBufferSize(200000)) {
-        Serial.println("[MQTT] WARN: 200KB PSRAM alloc failed, falling back to 64KB");
-        if (!_mqttClient.setBufferSize(65536)) {
-            Serial.println("[MQTT] WARN: 64KB alloc also failed, falling back to 8KB");
-            _mqttClient.setBufferSize(8192);
-        }
+    // 申请 16KB 的 MQTT 缓冲区（由于长度 <= 32KB，将优先分配到内部高速 SRAM 中）
+    if (!_mqttClient.setBufferSize(16384)) {
+        Serial.println("[MQTT] WARN: 16KB SRAM alloc failed, falling back to 8KB");
+        _mqttClient.setBufferSize(8192);
+    } else {
+        Serial.println("[MQTT] 16KB Buffer successfully allocated in internal SRAM.");
     }
 }
 
@@ -156,6 +212,10 @@ void NetworkHandler::_wifiInit() {
     if (WiFi.status() == WL_CONNECTED) {
         Serial.print("[WiFi] Connected! IP Address: ");
         Serial.println(WiFi.localIP());
+        Serial.printf("[WiFi] Gateway: %s, Subnet: %s, DNS: %s\n", 
+                      WiFi.gatewayIP().toString().c_str(), 
+                      WiFi.subnetMask().toString().c_str(), 
+                      WiFi.dnsIP().toString().c_str());
         Serial.print("[WiFi] RSSI (Signal Strength): ");
         Serial.println(WiFi.RSSI());
     } else {
@@ -168,6 +228,14 @@ void NetworkHandler::_reconnectMqtt(unsigned long now) {
         return; // 5秒重连节流
     }
     _lastReconnectTime = now;
+
+    // 每次重新连接前，尝试重新解析域名 IP，以应对动态 IP (DDNS) 变更或本地网络波动
+    IPAddress brokerIP = resolve_broker_ip();
+    if (brokerIP[0] != 0) {
+        _mqttClient.setServer(brokerIP, MQTT_PORT);
+    } else {
+        _mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+    }
 
     Serial.print("[MQTT] Connecting...");
     String clientId = "ESP32Camera-";

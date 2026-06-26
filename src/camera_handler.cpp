@@ -1,11 +1,33 @@
 #include "camera_handler.h"
 #include <Arduino.h>
 #include "config.h"
+#include "esp_log.h"
+#include <stdarg.h>
+
+// 自定义日志输出拦截函数，用于将 EV-EOF-OVF 缩写展开为带括号的全称与解释
+static int custom_log_vprintf(const char *format, va_list args) {
+    char buf[256];
+    va_list args_copy;
+    va_copy(args_copy, args);
+    int len = vsnprintf(buf, sizeof(buf), format, args_copy);
+    va_end(args_copy);
+
+    if (len > 0) {
+        if (strstr(buf, "EV-EOF-OVF") != NULL) {
+            // 拦截并输出包含全名的详细调试信息
+            printf("cam_hal: EV-EOF-OVF (Event End of Frame Overflow: DMA FIFO Buffer Overflow)\n");
+            return len;
+        }
+    }
+    return vprintf(format, args);
+}
 
 // 实例化全局单例
 CameraHandler camera;
 
 bool CameraHandler::init() {
+    // 注册自定义日志拦截器以捕获并展开摄像头驱动内部的 EV-EOF-OVF 缩写
+    esp_log_set_vprintf(custom_log_vprintf);
     camera_config_t config;
     config.ledc_channel = LEDC_CHANNEL_0;
     config.ledc_timer = LEDC_TIMER_0;
@@ -29,6 +51,7 @@ bool CameraHandler::init() {
     
     // 直接硬件输出 JPEG，禁用本地水印，以获取最高画质和帧率
     config.pixel_format = PIXFORMAT_JPEG;
+    config.grab_mode = CAMERA_GRAB_LATEST;
     
     if (psramFound()) {
         config.frame_size = FRAMESIZE_UXGA;   // 有 PSRAM 使用 UXGA(1600×1200) 最高分辨率

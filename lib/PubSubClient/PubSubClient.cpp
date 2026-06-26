@@ -17,7 +17,14 @@
 // 优先从 PSRAM 分配，PSRAM 不足时回退到内部 SRAM
 static uint8_t* psram_aware_malloc(size_t size) {
 #ifdef ESP32
-    // 首先尝试从 PSRAM 分配 (MALLOC_CAP_SPIRAM = 外部 SPI RAM)
+    // 小于等于 32KB 的小包优先分配至内部 SRAM，提供更快的读写性能
+    if (size <= 32768) {
+        uint8_t* ptr = (uint8_t*)heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (ptr != NULL) {
+            return ptr;
+        }
+    }
+    // 大封包或内部 SRAM 分配失败时，优先分配到外置 PSRAM，防止内部 SRAM 碎片化
     uint8_t* ptr = (uint8_t*)heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (ptr != NULL) {
         return ptr;
@@ -30,7 +37,14 @@ static uint8_t* psram_aware_malloc(size_t size) {
 
 static uint8_t* psram_aware_realloc(uint8_t* old_ptr, size_t old_size, size_t new_size) {
 #ifdef ESP32
-    // heap_caps_realloc 支持跨 PSRAM/SRAM 重新分配
+    // 如果新大小小于等于 32KB，优先尝试在内部 SRAM 重新分配
+    if (new_size <= 32768) {
+        uint8_t* ptr = (uint8_t*)heap_caps_realloc(old_ptr, new_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (ptr != NULL) {
+            return ptr;
+        }
+    }
+    // 否则尝试在 PSRAM 分配
     uint8_t* ptr = (uint8_t*)heap_caps_realloc(old_ptr, new_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (ptr != NULL) {
         return ptr;
