@@ -250,6 +250,12 @@ boolean PubSubClient::connect(const char *id, const char *user, const char *pass
 
 boolean PubSubClient::connect(const char *id, const char *user, const char *pass, const char* willTopic, uint8_t willQos, boolean willRetain, const char* willMessage, boolean cleanSession) {
     if (!connected()) {
+        // 防御性检查：buffer 可能在静态初始化期（PSRAM 就绪前）分配失败
+        if (this->buffer == NULL || this->bufferSize == 0) {
+            Serial.println("[PubSubClient] connect() aborted: buffer is NULL, call setBufferSize() first");
+            _state = MQTT_CONNECT_FAILED;
+            return false;
+        }
         int result = 0;
         if(_client->connected()) {
             result = 1;
@@ -589,21 +595,23 @@ int PubSubClient::endPublish() {
 }
 
 size_t PubSubClient::write(uint8_t data) {
+    if (!_client || !_client->connected()) return 0;
     lastOutActivity = millis();
     return _client->write(data);
 }
 
 size_t PubSubClient::write(const uint8_t *buffer, size_t size) {
+    if (!_client || !_client->connected()) return 0;
     lastOutActivity = millis();
     return _client->write(buffer,size);
 }
 
-size_t PubSubClient::buildHeader(uint8_t header, uint8_t* buf, uint16_t length) {
+size_t PubSubClient::buildHeader(uint8_t header, uint8_t* buf, uint32_t length) {
     uint8_t lenBuf[4];
     uint8_t llen = 0;
     uint8_t digit;
     uint8_t pos = 0;
-    uint16_t len = length;
+    uint32_t len = length;
     do {
         digit = len  & 127;
         len >>= 7;
@@ -621,13 +629,19 @@ size_t PubSubClient::buildHeader(uint8_t header, uint8_t* buf, uint16_t length) 
     return llen+1;
 }
 
-boolean PubSubClient::write(uint8_t header, uint8_t* buf, uint16_t length) {
-    uint16_t rc;
+boolean PubSubClient::write(uint8_t header, uint8_t* buf, uint32_t length) {
+    // 防御性检查：若 lwIP TCP PCB 已被置 NULL（TCP RST/FIN 竞态），直接返回失败
+    // 避免 StoreProhibited (EXCVADDR~0x05) 崩溃
+    if (!_client || !_client->connected()) {
+        _state = MQTT_CONNECTION_LOST;
+        return false;
+    }
+    size_t rc;
     uint8_t hlen = buildHeader(header, buf, length);
 
 #ifdef MQTT_MAX_TRANSFER_SIZE
     uint8_t* writeBuf = buf+(MQTT_MAX_HEADER_SIZE-hlen);
-    uint16_t bytesRemaining = length+hlen;
+    uint32_t bytesRemaining = length+hlen;
     uint8_t bytesToWrite;
     boolean result = true;
     while((bytesRemaining > 0) && result) {
@@ -783,26 +797,25 @@ boolean PubSubClient::setBufferSize(uint32_t size) {
     if (size == 0) {
         return false;
     }
-    if (this->bufferSize == 0) {
-        // 首次分配：优先使用 PSRAM
-        this->buffer = psram_aware_malloc(size);
+    uint8_t* newBuffer = NULL;
+    if (this->bufferSize == 0 || this->buffer == NULL) {
+        // 首次分配（或上次分配失败 buffer==NULL）：优先使用 PSRAM
+        newBuffer = psram_aware_malloc(size);
     } else {
         // 重新分配：优先使用 PSRAM
-        uint8_t* newBuffer = psram_aware_realloc(this->buffer, this->bufferSize, size);
-        if (newBuffer != NULL) {
-            this->buffer = newBuffer;
-        } else {
-            return false;
-        }
+        newBuffer = psram_aware_realloc(this->buffer, this->bufferSize, size);
     }
+    if (newBuffer == NULL) {
+        // 分配失败：保留原有 buffer/bufferSize 不变，返回 false
+        Serial.printf("[PubSubClient] Buffer alloc FAILED for %u bytes\n", size);
+        return false;
+    }
+    this->buffer = newBuffer;
     this->bufferSize = size;
-    bool ok = (this->buffer != NULL);
-    if (ok) {
-        Serial.printf("[PubSubClient] Buffer allocated: %u bytes @ %s\n",
-            size,
-            esp_ptr_external_ram(this->buffer) ? "PSRAM" : "internal RAM");
-    }
-    return ok;
+    Serial.printf("[PubSubClient] Buffer allocated: %u bytes @ %s\n",
+        size,
+        esp_ptr_external_ram(this->buffer) ? "PSRAM" : "internal RAM");
+    return true;
 }
 
 uint32_t PubSubClient::getBufferSize() {

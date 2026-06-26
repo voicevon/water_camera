@@ -96,9 +96,9 @@ private:
    uint32_t readPacket(uint8_t*);
    boolean readByte(uint8_t * result);
    boolean readByte(uint8_t * result, uint16_t * index);
-   boolean write(uint8_t header, uint8_t* buf, uint16_t length);
+   boolean write(uint8_t header, uint8_t* buf, uint32_t length);
    uint16_t writeString(const char* string, uint8_t* buf, uint16_t pos);
-   size_t buildHeader(uint8_t header, uint8_t* buf, uint16_t length);
+   size_t buildHeader(uint8_t header, uint8_t* buf, uint32_t length);
    IPAddress ip;
    const char* domain;
    uint16_t port;
