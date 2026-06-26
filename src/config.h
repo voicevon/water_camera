@@ -9,9 +9,12 @@
 #define MQTT_BROKER     "voicevon.vicp.io"
 #define MQTT_PORT       1883
 
+// -------- 站点名称配置 --------
+#define STATION_NAME    "dongzhan"
+
 // -------- MQTT Topic 配置 --------
-#define MQTT_CMD_TOPIC  "water/dongzhan/camera/cmd"
-#define MQTT_DATA_TOPIC "water/dongzhan/camera/status"
+#define MQTT_CMD_TOPIC  "water/photo/take"
+#define MQTT_DATA_TOPIC "water/photo/status/" STATION_NAME
 
 // MQTT 非阻塞重连最小间隔（毫秒）
 #define MQTT_RECONNECT_INTERVAL_MS  5000UL
