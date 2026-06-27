@@ -28,6 +28,11 @@ CameraHandler camera;
 bool CameraHandler::init() {
     // 注册自定义日志拦截器以捕获并展开摄像头驱动内部的 EV-EOF-OVF 缩写
     esp_log_set_vprintf(custom_log_vprintf);
+    
+    // 显式设置摄像头底层日志级别为 VERBOSE
+    esp_log_level_set("camera", ESP_LOG_VERBOSE);
+    esp_log_level_set("cam_hal", ESP_LOG_VERBOSE);
+
     camera_config_t config;
     config.ledc_channel = LEDC_CHANNEL_0;
     config.ledc_timer = LEDC_TIMER_0;
@@ -47,30 +52,33 @@ bool CameraHandler::init() {
     config.pin_sccb_scl = SIOC_GPIO_NUM;
     config.pin_pwdn = PWDN_GPIO_NUM;
     config.pin_reset = RESET_GPIO_NUM;
-    config.xclk_freq_hz = 20000000;
+    config.xclk_freq_hz = 10000000;
     
     // 直接硬件输出 JPEG，禁用本地水印，以获取最高画质和帧率
     config.pixel_format = PIXFORMAT_JPEG;
     config.grab_mode = CAMERA_GRAB_LATEST;
     
-    if (psramFound()) {
-        config.frame_size = FRAMESIZE_UXGA;   // 有 PSRAM 使用 UXGA(1600×1200) 最高分辨率
-        config.jpeg_quality = 4;              // 最高 JPEG 编码质量 (0-63，越小越好)
-        config.fb_count = 2;                  // 双缓冲，提高帧捕获和传输效率
-        Serial.println("[Camera] PSRAM found. Resolution: UXGA (1600x1200), Format: JPEG, fb_count: 2, jpeg_quality: 4");
-    } else {
-        config.frame_size = FRAMESIZE_SVGA;   // 无 PSRAM 降级使用 SVGA (800x600)
-        config.jpeg_quality = 8;              // 较低的编码质量以节省 RAM
-        config.fb_count = 1;
-        Serial.println("[Camera] No PSRAM. Resolution: SVGA (800x600), Format: JPEG, fb_count: 1, jpeg_quality: 8");
-    }
+    // 使用 config.h 中配置的自定义分辨率和压缩质量 (硬件具备 PSRAM，默认使用双缓冲)
+    config.frame_size = CAMERA_FRAME_SIZE;
+    config.jpeg_quality = CAMERA_JPEG_QUALITY;
+    config.fb_count = 2;                  // 使用双缓冲以提高帧捕获和传输效率
+    Serial.printf("[Camera] 配置已应用 - 分辨率宏: %d, JPEG 编码质量(0-63): %d, 双缓冲\n", 
+                  config.frame_size, config.jpeg_quality);
+
+    Serial.printf("[Camera] Before esp_camera_init - Free Heap: %u bytes, Free PSRAM: %u bytes\n", 
+                  ESP.getFreeHeap(), ESP.getFreePsram());
 
     // 初始化摄像头
     esp_err_t err = esp_camera_init(&config);
     if (err != ESP_OK) {
         Serial.printf("[Camera] Init failed, err: 0x%x\n", err);
+        Serial.printf("[Camera] After init failed - Free Heap: %u bytes, Free PSRAM: %u bytes\n", 
+                      ESP.getFreeHeap(), ESP.getFreePsram());
         return false;
     }
+    
+    Serial.printf("[Camera] After init success - Free Heap: %u bytes, Free PSRAM: %u bytes\n", 
+                  ESP.getFreeHeap(), ESP.getFreePsram());
     
     // 调整 OV2640 传感器图像质量参数（最高画质模式）
     sensor_t *s = esp_camera_sensor_get();
@@ -104,23 +112,51 @@ bool CameraHandler::init() {
 }
 
 camera_fb_t* CameraHandler::capture() {
+    Serial.printf("[Camera] Start capture - Free Heap: %u bytes, Free PSRAM: %u bytes\n", 
+                  ESP.getFreeHeap(), ESP.getFreePsram());
+
     Serial.println("[Camera] Clearing old frame cache...");
-    // 连续抓取并丢弃一帧，确保画面为最新且曝光算法（AEC/AWB）收敛
+    uint32_t start_time = millis();
     camera_fb_t * fb = esp_camera_fb_get();
+    uint32_t duration = millis() - start_time;
     if (fb) {
+        Serial.printf("[Camera] Clear old frame cache succeeded. Took %u ms.\n", duration);
         esp_camera_fb_return(fb);
+    } else {
+        Serial.printf("[Camera] Clear old frame cache failed (nullptr returned). Took %u ms.\n", duration);
     }
     
     Serial.println("[Camera] Taking actual photo...");
-    // 捕获真实硬件 JPEG 数据帧
+    start_time = millis();
     fb = esp_camera_fb_get();
+    duration = millis() - start_time;
     if (!fb) {
-        Serial.println("[Camera] Capture failed!");
+        Serial.printf("[Camera] Taking actual photo failed (nullptr returned). Took %u ms.\n", duration);
+        Serial.printf("[Camera] Failure memory status - Free Heap: %u bytes, Free PSRAM: %u bytes\n", 
+                      ESP.getFreeHeap(), ESP.getFreePsram());
+        
+        // I2C 物理自检，读取 OV2640 内部 PID 和 VER 寄存器
+        sensor_t * s = esp_camera_sensor_get();
+        if (s == nullptr) {
+            Serial.println("[Camera] Fail Diagnosis: Failed to get sensor pointer from esp-camera!");
+        } else {
+            int pid = s->get_reg(s, 0x0A, 0xFF);
+            int ver = s->get_reg(s, 0x0B, 0xFF);
+            Serial.printf("[Camera] Fail Diagnosis: Sensor SCCB (I2C) Read test: PID=0x%02X, VER=0x%02X (Expected PID=0x26)\n", 
+                          pid, ver);
+            if (pid == 0x26) {
+                Serial.println("[Camera] Fail Diagnosis result: SCCB (I2C) is communicating normally. Sensor is alive. "
+                               "Capture failure is likely due to high-speed data transmission (VSYNC/PCLK signal integrity, noise, or timing).");
+            } else {
+                Serial.println("[Camera] Fail Diagnosis result: SCCB (I2C) read returned unexpected value or failed. "
+                               "Sensor might be dead, powered down (PWDN pin issue), or I2C bus is hung.");
+            }
+        }
         return nullptr;
     }
     
-    Serial.printf("[Camera] Captured! Size: %.1f KB, Format: %d, Resolution: %ux%u\n", 
-                  fb->len / 1024.0f, fb->format, fb->width, fb->height);
+    Serial.printf("[Camera] Actual capture succeeded. Took %u ms. Size: %.1f KB, Format: %d, Resolution: %ux%u\n", 
+                  duration, fb->len / 1024.0f, fb->format, fb->width, fb->height);
     return fb;
 }
 

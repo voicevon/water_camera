@@ -9,8 +9,19 @@
 #define MQTT_BROKER     "voicevon.vicp.io"
 #define MQTT_PORT       1883
 
-// -------- 站点名称配置 --------
-#define STATION_NAME    "dongzhan"
+// -------- 站点及图像配置 (拍照目标与画质) --------
+#define STATION_NAME    "dongzhan"  // 拍照的目标站点名称 (当 MQTT 指令内容与该站点匹配时触发拍照)
+
+// 帧大小配置（图像尺寸分辨率）
+// 可选分辨率：FRAMESIZE_UXGA (1600x1200), FRAMESIZE_SXGA (1280x1024), FRAMESIZE_XGA (1024x768), 
+//            FRAMESIZE_SVGA (800x600), FRAMESIZE_VGA (640x480), FRAMESIZE_QVGA (320x240) 等
+#define CAMERA_FRAME_SIZE       FRAMESIZE_VGA  // 默认使用较小的 VGA (640x480) 尺寸，可根据需要调整
+// #define CAMERA_FRAME_SIZE       FRAMESIZE_SVGA  // 默认使用较小的 VGA (640x480) 尺寸，可根据需要调整
+
+// JPEG 压缩画质配置
+// 取值范围：0-63。数值越小图片质量越高/体积越大，数值越大压缩率越高/文件越小。
+// 建议：大压缩率可设为 12 - 20
+#define CAMERA_JPEG_QUALITY     8  // 默认设为 12，提供较大的压缩率以减小文件体积
 
 // -------- MQTT Topic 配置 --------
 #define MQTT_CMD_TOPIC  "water/photo/take"
