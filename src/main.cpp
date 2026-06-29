@@ -78,7 +78,15 @@ void setup() {
     // 先初始化摄像头硬件，确保供电稳定（WiFi 未启动时系统电流最低，电压最稳定）
     if (!camera.init()) {
         Serial.println("System halt due to camera init failure! Restarting in 3 seconds...");
-        delay(3000);
+        
+        // 摄像头初始化失败：闪烁 3 次指示灯（200ms 亮 / 200ms 灭）作为硬件诊断指示
+        for (int i = 0; i < 3; i++) {
+            digitalWrite(STATUS_LED_GPIO_NUM, STATUS_LED_ON);
+            delay(200);
+            digitalWrite(STATUS_LED_GPIO_NUM, STATUS_LED_OFF);
+            delay(200);
+        }
+        
         ESP.restart();
     }
 
