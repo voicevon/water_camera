@@ -53,6 +53,8 @@ private:
     void _reconnectMqtt(unsigned long now);
     void _handleStatusLed(unsigned long now);
     void _handleWifiReconnect(unsigned long now);
+
+    friend void mqtt_connect_task(void* pvParameters);
 };
 
 // 全局单例声明

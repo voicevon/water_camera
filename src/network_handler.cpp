@@ -50,21 +50,50 @@ static IPAddress resolve_broker_ip() {
     return IPAddress(0, 0, 0, 0);
 }
 
-// 共享状态变量，用于后台异步 DNS 解析任务
+// 共享状态变量，用于后台异步 DNS 解析与 MQTT 连接任务
 static IPAddress s_resolved_broker_ip = IPAddress(0, 0, 0, 0);
-static bool s_dns_resolving = false;
+static bool s_mqtt_connecting = false;
+static unsigned long s_last_dns_resolve_ms = 0;
 
-// FreeRTOS 后台异步解析任务
-static void dns_resolve_task(void* pvParameters) {
-    IPAddress tempIP = resolve_broker_ip();
-    if (tempIP[0] != 0) {
-        s_resolved_broker_ip = tempIP;
-        Serial.printf("[DNS Task] Asynchronously resolved IP: %s\n", tempIP.toString().c_str());
-    } else {
-        Serial.println("[DNS Task] Asynchronous resolution failed.");
+// FreeRTOS 后台异步解析与连接任务
+void mqtt_connect_task(void* pvParameters) {
+    s_mqtt_connecting = true;
+    
+    unsigned long now = millis();
+    // 如果尚未解析成功过，或者解析缓存已超过 5 分钟，则触发 DNS/HTTP-DNS 解析
+    if (s_resolved_broker_ip[0] == 0 || (now - s_last_dns_resolve_ms > 300000)) {
+        s_last_dns_resolve_ms = now;
+        IPAddress tempIP = resolve_broker_ip();
+        if (tempIP[0] != 0) {
+            s_resolved_broker_ip = tempIP;
+            Serial.printf("[MQTT Task] DNS resolved IP: %s\n", tempIP.toString().c_str());
+        } else {
+            Serial.println("[MQTT Task] DNS resolution failed, will fallback to domain.");
+        }
     }
-    s_dns_resolving = false;
-    vTaskDelete(NULL); // 解析完成，自我销毁任务
+    
+    // 配置服务器地址
+    if (s_resolved_broker_ip[0] != 0) {
+        network._mqttClient.setServer(s_resolved_broker_ip, MQTT_PORT);
+    } else {
+        network._mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+    }
+    
+    // 执行阻塞的 TCP 连接与 MQTT 握手
+    Serial.println("[MQTT Task] Attempting connection to Broker...");
+    String clientId = "ESP32Camera-";
+    clientId += String(random(0xffff), HEX);
+    
+    if (network._mqttClient.connect(clientId.c_str())) {
+        Serial.println("[MQTT Task] Connected successfully!");
+        network._mqttClient.subscribe(MQTT_CMD_TOPIC);
+        Serial.printf("[MQTT Task] Subscribed to topic: %s\n", MQTT_CMD_TOPIC);
+    } else {
+        Serial.printf("[MQTT Task] Connection failed, state = %d\n", network._mqttClient.state());
+    }
+    
+    s_mqtt_connecting = false;
+    vTaskDelete(NULL); // 连接任务完成，自我销毁
 }
 
 // 实例化全局单例
@@ -135,6 +164,7 @@ void NetworkHandler::init() {
     IPAddress brokerIP = resolve_broker_ip();
     if (brokerIP[0] != 0) {
         s_resolved_broker_ip = brokerIP; // 同步保存初始解析结果
+        s_last_dns_resolve_ms = millis(); // 初始化解析时间戳
         _mqttClient.setServer(brokerIP, MQTT_PORT);
         Serial.printf("[MQTT] Server set to resolved IP: %s:%d\n", brokerIP.toString().c_str(), MQTT_PORT);
     } else {
@@ -243,35 +273,17 @@ void NetworkHandler::_wifiInit() {
 
 void NetworkHandler::_reconnectMqtt(unsigned long now) {
     if (now - _lastReconnectTime < MQTT_RECONNECT_INTERVAL_MS) {
-        return; // 5秒重连节流
+        return; // 5秒连接尝试间隔节流
     }
+    
+    if (s_mqtt_connecting) {
+        return; // 如果当前后台已经在尝试连接，则直接跳过，避免重复创建任务
+    }
+    
     _lastReconnectTime = now;
-
-    // 异步域名解析：如果尚未解析出 IP，或距离上一次触发已超过 5 分钟，且当前无任务在执行，则启动后台任务
-    static unsigned long last_dns_trigger_ms = 0;
-    if ((s_resolved_broker_ip[0] == 0 || (now - last_dns_trigger_ms > 300000)) && !s_dns_resolving) {
-        s_dns_resolving = true;
-        last_dns_trigger_ms = now;
-        xTaskCreate(dns_resolve_task, "dns_resolve", 4096, NULL, 1, NULL);
-    }
-
-    if (s_resolved_broker_ip[0] != 0) {
-        _mqttClient.setServer(s_resolved_broker_ip, MQTT_PORT);
-    } else {
-        _mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
-    }
-
-    Serial.print("[MQTT] Connecting...");
-    String clientId = "ESP32Camera-";
-    clientId += String(random(0xffff), HEX);
-
-    if (_mqttClient.connect(clientId.c_str())) {
-        Serial.println(" connected.");
-        _mqttClient.subscribe(MQTT_CMD_TOPIC);
-        Serial.printf("[MQTT] Subscribed to topic: %s\n", MQTT_CMD_TOPIC);
-    } else {
-        Serial.printf(" failed, state = %s\n", mqtt_state_to_string(_mqttClient.state()));
-    }
+    
+    // 启动后台异步解析与连接任务
+    xTaskCreate(mqtt_connect_task, "mqtt_conn", 8192, NULL, 1, NULL);
 }
 
 void NetworkHandler::_handleStatusLed(unsigned long now) {
