@@ -251,42 +251,25 @@ void NetworkHandler::_reconnectMqtt(unsigned long now) {
 }
 
 void NetworkHandler::_handleStatusLed(unsigned long now) {
-    static unsigned long last_blink_time = 0;
-    static bool led_on = false;
-    
     // 根据当前连接状态动态设定闪烁周期（占空比均为 50%）
-    unsigned long period = 5000;
+    unsigned long period = 0;
     if (WiFi.status() == WL_CONNECTED) {
         if (_mqttClient.connected()) {
-            period = 1000; // WiFi 与 MQTT 均连接成功：1 秒周期 (快闪表示正常)
+            period = 1000; // WiFi 与 MQTT 均连接成功：1 秒周期 (快闪)
         } else {
             period = 2000; // 仅 WiFi 连接成功：2 秒周期 (中速闪烁)
         }
     } else {
-        period = 5000;     // WiFi 未连接（两者都未成功）：5 秒周期 (慢闪)
+        period = 0;        // WiFi 未连接：常灭
     }
     
-    unsigned long half_period = period / 2;
-    unsigned long elapsed = now - last_blink_time;
-    
-    if (elapsed >= period) {
-        elapsed = 0;
-        last_blink_time = now;
-        led_on = false;
+    if (period == 0) {
         digitalWrite(STATUS_LED_GPIO_NUM, STATUS_LED_OFF);
-    }
-    
-    if (led_on) {
-        if (elapsed >= half_period) {
-            led_on = false;
-            last_blink_time = now;
-            digitalWrite(STATUS_LED_GPIO_NUM, STATUS_LED_OFF);
-        }
     } else {
-        if (elapsed >= half_period) {
-            led_on = true;
-            last_blink_time = now;
+        if ((now % period) < (period / 2)) {
             digitalWrite(STATUS_LED_GPIO_NUM, STATUS_LED_ON);
+        } else {
+            digitalWrite(STATUS_LED_GPIO_NUM, STATUS_LED_OFF);
         }
     }
 }
