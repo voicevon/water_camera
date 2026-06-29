@@ -50,6 +50,23 @@ static IPAddress resolve_broker_ip() {
     return IPAddress(0, 0, 0, 0);
 }
 
+// 共享状态变量，用于后台异步 DNS 解析任务
+static IPAddress s_resolved_broker_ip = IPAddress(0, 0, 0, 0);
+static bool s_dns_resolving = false;
+
+// FreeRTOS 后台异步解析任务
+static void dns_resolve_task(void* pvParameters) {
+    IPAddress tempIP = resolve_broker_ip();
+    if (tempIP[0] != 0) {
+        s_resolved_broker_ip = tempIP;
+        Serial.printf("[DNS Task] Asynchronously resolved IP: %s\n", tempIP.toString().c_str());
+    } else {
+        Serial.println("[DNS Task] Asynchronous resolution failed.");
+    }
+    s_dns_resolving = false;
+    vTaskDelete(NULL); // 解析完成，自我销毁任务
+}
+
 // 实例化全局单例
 NetworkHandler network;
 
@@ -117,6 +134,7 @@ void NetworkHandler::init() {
     // 动态解析 MQTT Broker 的 IP，以应对本地 DNS 劫持或 DDNS IP 发生变更的问题
     IPAddress brokerIP = resolve_broker_ip();
     if (brokerIP[0] != 0) {
+        s_resolved_broker_ip = brokerIP; // 同步保存初始解析结果
         _mqttClient.setServer(brokerIP, MQTT_PORT);
         Serial.printf("[MQTT] Server set to resolved IP: %s:%d\n", brokerIP.toString().c_str(), MQTT_PORT);
     } else {
@@ -229,10 +247,16 @@ void NetworkHandler::_reconnectMqtt(unsigned long now) {
     }
     _lastReconnectTime = now;
 
-    // 每次重新连接前，尝试重新解析域名 IP，以应对动态 IP (DDNS) 变更或本地网络波动
-    IPAddress brokerIP = resolve_broker_ip();
-    if (brokerIP[0] != 0) {
-        _mqttClient.setServer(brokerIP, MQTT_PORT);
+    // 异步域名解析：如果尚未解析出 IP，或距离上一次触发已超过 5 分钟，且当前无任务在执行，则启动后台任务
+    static unsigned long last_dns_trigger_ms = 0;
+    if ((s_resolved_broker_ip[0] == 0 || (now - last_dns_trigger_ms > 300000)) && !s_dns_resolving) {
+        s_dns_resolving = true;
+        last_dns_trigger_ms = now;
+        xTaskCreate(dns_resolve_task, "dns_resolve", 4096, NULL, 1, NULL);
+    }
+
+    if (s_resolved_broker_ip[0] != 0) {
+        _mqttClient.setServer(s_resolved_broker_ip, MQTT_PORT);
     } else {
         _mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
     }
