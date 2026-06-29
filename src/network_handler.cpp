@@ -55,10 +55,7 @@ static IPAddress s_resolved_broker_ip = IPAddress(0, 0, 0, 0);
 static bool s_mqtt_connecting = false;
 static unsigned long s_last_dns_resolve_ms = 0;
 
-// FreeRTOS 后台异步解析与连接任务
 void mqtt_connect_task(void* pvParameters) {
-    s_mqtt_connecting = true;
-    
     unsigned long now = millis();
     // 如果尚未解析成功过，或者解析缓存已超过 5 分钟，则触发 DNS/HTTP-DNS 解析
     if (s_resolved_broker_ip[0] == 0 || (now - s_last_dns_resolve_ms > 300000)) {
@@ -282,8 +279,13 @@ void NetworkHandler::_reconnectMqtt(unsigned long now) {
     
     _lastReconnectTime = now;
     
-    // 启动后台异步解析与连接任务
-    xTaskCreate(mqtt_connect_task, "mqtt_conn", 8192, NULL, 1, NULL);
+    // 启动后台异步解析与连接任务，并捕获结果
+    BaseType_t ret = xTaskCreate(mqtt_connect_task, "mqtt_conn", 8192, NULL, 1, NULL);
+    if (ret == pdPASS) {
+        s_mqtt_connecting = true; // 任务创建成功，立即加锁
+    } else {
+        Serial.println("[MQTT] Error: Failed to create MQTT connection task!");
+    }
 }
 
 void NetworkHandler::_handleStatusLed(unsigned long now) {
