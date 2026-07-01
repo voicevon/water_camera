@@ -24,6 +24,12 @@ public:
      * @param fb 帧缓冲区指针
      */
     void release(camera_fb_t* fb);
+
+    /**
+     * @brief 获取当前图像的平均亮度 (YAVG 寄存器值)
+     * @return int 亮度值 (0-255)，失败返回 -1
+     */
+    int get_yavg();
 };
 
 // 全局单例声明

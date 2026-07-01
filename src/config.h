@@ -30,8 +30,10 @@
 // MQTT 非阻塞重连最小间隔（毫秒）
 #define MQTT_RECONNECT_INTERVAL_MS  5000UL
 
-// -------- 闪光灯引脚配置 --------
+// -------- 闪光灯与亮度评估配置 --------
 #define FLASH_GPIO_NUM    4
+#define AMBIENT_BRIGHTNESS_THRESHOLD  80  // 亮度阈值 (0-255)，低于此值认为需要闪光灯
+
 
 // -------- LED 指示灯引脚配置 --------
 #define STATUS_LED_GPIO_NUM  33   // 板载红色指示灯 (低电平有效)

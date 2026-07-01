@@ -165,3 +165,15 @@ void CameraHandler::release(camera_fb_t* fb) {
         esp_camera_fb_return(fb);
     }
 }
+
+int CameraHandler::get_yavg() {
+    sensor_t *s = esp_camera_sensor_get();
+    if (s == nullptr) {
+        Serial.println("[Camera] Failed to get sensor pointer for YAVG!");
+        return -1;
+    }
+    // 0x12F: 1 表示 Bank 1，2F 是 YAVG 寄存器地址
+    int yavg = s->get_reg(s, 0x12F, 0xFF);
+    Serial.printf("[Camera] Current YAVG: %d\n", yavg);
+    return yavg;
+}
