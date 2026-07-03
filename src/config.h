@@ -33,6 +33,9 @@
 // -------- 闪光灯与亮度评估配置 --------
 #define FLASH_GPIO_NUM    4
 #define AMBIENT_BRIGHTNESS_THRESHOLD  80  // 亮度阈值 (0-255)，低于此值认为需要闪光灯
+// 闪光灯预热时间（毫秒）：亮灯后等待此时间再拍照，让 AEC/AGC 充分稳定
+// OV2640 自动曝光收敛约需 300-500ms，过短会导致图像过曝或曝光不足
+#define FLASH_WARMUP_MS   800
 
 
 // -------- LED 指示灯引脚配置 --------

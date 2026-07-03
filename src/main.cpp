@@ -48,7 +48,7 @@ bool process_photo_job(bool use_flash) {
     if (use_flash) {
         Serial.println("[Photo] Enabling flash for capture...");
         digitalWrite(FLASH_GPIO_NUM, HIGH);
-        delay(200); // 给传感器稳定曝光和 AEC/AGC 反应的时间
+        delay(FLASH_WARMUP_MS); // 等待 AEC/AGC 收敛稳定，时长由 config.h 中 FLASH_WARMUP_MS 控制
     } else {
         digitalWrite(FLASH_GPIO_NUM, LOW);
     }
