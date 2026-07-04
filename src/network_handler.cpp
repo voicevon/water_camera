@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <HTTPClient.h>
 #include "config.h"
+#include "web_config.h"
 
 // 备用 DNS 解析：结合标准 DNS 与 HTTP-DNS，绕过本地代理劫持 (Fake-IP)
 static IPAddress resolve_broker_ip() {
@@ -241,11 +242,14 @@ void NetworkHandler::processMqtt() {
 void NetworkHandler::_wifiInit() {
     scan_wifi_networks();
 
-    Serial.printf("[WiFi] Target SSID to connect: \"%s\" (Length: %zu)\n", WIFI_SSID, strlen(WIFI_SSID));
-    Serial.printf("[WiFi] Target Password: \"%s\" (Length: %zu)\n", WIFI_PASSWORD, strlen(WIFI_PASSWORD));
+    String target_ssid = get_sta_ssid();
+    String target_pass = get_sta_password();
+
+    Serial.printf("[WiFi] Target SSID to connect: \"%s\" (Length: %zu)\n", target_ssid.c_str(), target_ssid.length());
+    Serial.printf("[WiFi] Target Password: \"%s\" (Length: %zu)\n", target_pass.c_str(), target_pass.length());
 
     Serial.print("[WiFi] Connecting to target network...");
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    WiFi.begin(target_ssid.c_str(), target_pass.c_str());
 
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 20) {
@@ -335,7 +339,7 @@ void NetworkHandler::_handleWifiReconnect(unsigned long now) {
         if (now - last_reconnect_attempt >= 20000) {
             last_reconnect_attempt = now;
             Serial.println("[WiFi] Connection timeout, initiating begin() again...");
-            WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+            WiFi.begin(get_sta_ssid().c_str(), get_sta_password().c_str());
         }
     } else {
         last_reconnect_attempt = now;

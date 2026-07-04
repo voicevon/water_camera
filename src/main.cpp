@@ -2,6 +2,7 @@
 #include "camera_handler.h"
 #include "network_handler.h"
 #include "config.h"
+#include "web_config.h"
 
 // 异步拍照任务与重试状态机控制变量
 static volatile bool s_need_take_photo = false;
@@ -48,7 +49,7 @@ bool process_photo_job(bool use_flash) {
     if (use_flash) {
         Serial.println("[Photo] Enabling flash for capture...");
         digitalWrite(FLASH_GPIO_NUM, HIGH);
-        delay(FLASH_WARMUP_MS); // 等待 AEC/AGC 收敛稳定，时长由 config.h 中 FLASH_WARMUP_MS 控制
+        delay((int)(get_warmup_sec() * 1000.0f)); // 等待 AEC/AGC 收敛稳定，由 NVS 中的 get_warmup_sec 控制
     } else {
         digitalWrite(FLASH_GPIO_NUM, LOW);
     }
@@ -111,6 +112,9 @@ void setup() {
         ESP.restart();
     }
 
+    // 初始化 AP_STA 双模与 Web 配置服务器
+    web_config_init();
+
     // 摄像头初始化成功后再初始化网络连接
     network.init();
     network.setMqttCallback(mqtt_callback);
@@ -142,6 +146,7 @@ void evaluate_brightness() {
 }
 
 void loop() {
+    web_config_loop();
     unsigned long now = millis();
     static unsigned long s_last_loop_ms = 0;
     if (s_last_loop_ms == 0) {
