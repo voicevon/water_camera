@@ -7,24 +7,25 @@
 // 备用 DNS 解析：结合标准 DNS 与 HTTP-DNS，绕过本地代理劫持 (Fake-IP)
 static IPAddress resolve_broker_ip() {
     IPAddress resolvedIP;
+    String broker = get_mqtt_broker();
     
     // 1. 尝试使用标准的 DNS 解析
-    if (WiFi.hostByName(MQTT_BROKER, resolvedIP)) {
+    if (WiFi.hostByName(broker.c_str(), resolvedIP)) {
         // 如果解析出来的 IP 属于 Clash 的 Fake-IP 范围 (198.18.x.x)，说明被本地代理劫持且 ESP32 无法直接路由
         if (resolvedIP[0] == 198 && resolvedIP[1] == 18) {
             Serial.printf("[DNS] Resolved to Fake-IP %s, bypassing...\n", resolvedIP.toString().c_str());
         } else {
-            Serial.printf("[DNS] Successfully resolved %s to %s via standard DNS\n", MQTT_BROKER, resolvedIP.toString().c_str());
+            Serial.printf("[DNS] Successfully resolved %s to %s via standard DNS\n", broker.c_str(), resolvedIP.toString().c_str());
             return resolvedIP;
         }
     } else {
-        Serial.printf("[DNS] Standard DNS failed for %s\n", MQTT_BROKER);
+        Serial.printf("[DNS] Standard DNS failed for %s\n", broker.c_str());
     }
     
     // 2. 备用方案：使用 HTTP-DNS (通过 TCP 80 端口直接查询 223.5.5.5，绕过本地 53 端口 DNS 劫持)
     Serial.println("[DNS] Attempting HTTP-DNS resolution via AliDNS...");
     HTTPClient http;
-    String url = "http://223.5.5.5/resolve?name=" + String(MQTT_BROKER) + "&type=A";
+    String url = "http://223.5.5.5/resolve?name=" + broker + "&type=A";
     http.begin(url);
     http.setTimeout(3000); // 3 秒超时
     
@@ -38,7 +39,7 @@ static IPAddress resolve_broker_ip() {
             if (end != -1) {
                 String ipStr = payload.substring(start, end);
                 if (resolvedIP.fromString(ipStr.c_str())) {
-                    Serial.printf("[DNS] HTTP-DNS successfully resolved %s to %s\n", MQTT_BROKER, resolvedIP.toString().c_str());
+                    Serial.printf("[DNS] HTTP-DNS successfully resolved %s to %s\n", broker.c_str(), resolvedIP.toString().c_str());
                     return resolvedIP;
                 }
             }
@@ -72,9 +73,9 @@ void mqtt_connect_task(void* pvParameters) {
     
     // 配置服务器地址
     if (s_resolved_broker_ip[0] != 0) {
-        network._mqttClient.setServer(s_resolved_broker_ip, MQTT_PORT);
+        network._mqttClient.setServer(s_resolved_broker_ip, get_mqtt_port());
     } else {
-        network._mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+        network._mqttClient.setServer(get_mqtt_broker().c_str(), get_mqtt_port());
     }
     
     // 执行阻塞的 TCP 连接与 MQTT 握手
@@ -160,14 +161,16 @@ void NetworkHandler::init() {
     
     // 动态解析 MQTT Broker 的 IP，以应对本地 DNS 劫持或 DDNS IP 发生变更的问题
     IPAddress brokerIP = resolve_broker_ip();
+    int port = get_mqtt_port();
+    String broker = get_mqtt_broker();
     if (brokerIP[0] != 0) {
         s_resolved_broker_ip = brokerIP; // 同步保存初始解析结果
         s_last_dns_resolve_ms = millis(); // 初始化解析时间戳
-        _mqttClient.setServer(brokerIP, MQTT_PORT);
-        Serial.printf("[MQTT] Server set to resolved IP: %s:%d\n", brokerIP.toString().c_str(), MQTT_PORT);
+        _mqttClient.setServer(brokerIP, port);
+        Serial.printf("[MQTT] Server set to resolved IP: %s:%d\n", brokerIP.toString().c_str(), port);
     } else {
-        _mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
-        Serial.printf("[MQTT] DNS resolution failed, fallback to domain: %s:%d\n", MQTT_BROKER, MQTT_PORT);
+        _mqttClient.setServer(broker.c_str(), port);
+        Serial.printf("[MQTT] DNS resolution failed, fallback to domain: %s:%d\n", broker.c_str(), port);
     }
 
     // 申请 16KB 的 MQTT 缓冲区（由于长度 <= 32KB，将优先分配到内部高速 SRAM 中）
@@ -199,7 +202,8 @@ bool NetworkHandler::publishPhoto(const uint8_t* data, size_t len) {
     }
 
     Serial.printf("[MQTT] Publishing photo payload (%.1f KB) via streaming...\n", len / 1024.0f);
-    if (_mqttClient.beginPublish(MQTT_DATA_TOPIC, len, false)) {
+    String topic = "water/photo/status/" + get_station_name();
+    if (_mqttClient.beginPublish(topic.c_str(), len, false)) {
         // 分块写入，每块 512 字节，避免 TCP 发送缓冲区溢出
         const size_t CHUNK = 512;
         size_t sent = 0;

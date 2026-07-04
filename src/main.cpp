@@ -36,7 +36,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
         
         Serial.printf("[MQTT RX] Payload: %s\n", payload_str);
         // 比对 Payload 是否与自身站点名称一致
-        if (strcmp(payload_str, STATION_NAME) == 0) {
+        if (strcmp(payload_str, get_station_name().c_str()) == 0) {
             trigger_photo_capture(); // 匹配成功，异步触发拍照并重置重试状态
         }
     }

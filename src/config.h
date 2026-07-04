@@ -2,15 +2,15 @@
 #define CONFIG_H
 
 // -------- WiFi 网络配置 --------
-#define WIFI_SSID       "Perfect"
-#define WIFI_PASSWORD   "12344321"
+#define FACTORY_WIFI_SSID       "Perfect"
+#define FACTORY_WIFI_PASSWORD   "12344321"
 
 // -------- MQTT Broker 配置 --------
-#define MQTT_BROKER     "voicevon.vicp.io"
-#define MQTT_PORT       1883
+#define FACTORY_MQTT_BROKER     "voicevon.vicp.io"
+#define FACTORY_MQTT_PORT       1883
 
 // -------- 站点及图像配置 (拍照目标与画质) --------
-#define STATION_NAME    "dongzhan"  // 拍照的目标站点名称 (当 MQTT 指令内容与该站点匹配时触发拍照)
+#define FACTORY_STATION_NAME    "dongzhan"  // 拍照的目标站点名称 (当 MQTT 指令内容与该站点匹配时触发拍照)
 
 // 帧大小配置（图像尺寸分辨率）
 // 可选分辨率：FRAMESIZE_UXGA (1600x1200), FRAMESIZE_SXGA (1280x1024), FRAMESIZE_XGA (1024x768), 
@@ -25,7 +25,6 @@
 
 // -------- MQTT Topic 配置 --------
 #define MQTT_CMD_TOPIC  "water/photo/take"
-#define MQTT_DATA_TOPIC "water/photo/status/" STATION_NAME
 
 // MQTT 非阻塞重连最小间隔（毫秒）
 #define MQTT_RECONNECT_INTERVAL_MS  5000UL

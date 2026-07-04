@@ -28,4 +28,19 @@ String get_sta_password();
  */
 float get_warmup_sec();
 
+/**
+ * @brief 从 NVS 获取配置的站点名称 (STATION_NAME)
+ */
+String get_station_name();
+
+/**
+ * @brief 从 NVS 获取配置的 MQTT Broker 地址
+ */
+String get_mqtt_broker();
+
+/**
+ * @brief 从 NVS 获取配置的 MQTT Broker 端口
+ */
+int get_mqtt_port();
+
 #endif // WEB_CONFIG_H

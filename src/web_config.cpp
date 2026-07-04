@@ -12,6 +12,9 @@ static Preferences s_prefs;
 static String s_sta_ssid = "";
 static String s_sta_password = "";
 static float s_warmup_sec = 0.8f;
+static String s_sta_name = "";
+static String s_mqtt_broker = "";
+static int s_mqtt_port = 1883;
 
 // 极简暗黑风格 SPA 前端 HTML
 static const char INDEX_HTML[] PROGMEM = R"rawhtml(
@@ -50,84 +53,91 @@ static const char INDEX_HTML[] PROGMEM = R"rawhtml(
 
         .container {
             width: 100%;
-            max-width: 450px;
+            max-width: 480px;
         }
 
         header {
-            margin-bottom: 2rem;
             text-align: center;
+            margin-bottom: 2rem;
         }
 
         header h1 {
             font-size: 1.5rem;
             font-weight: 700;
-            color: var(--accent-blue);
+            letter-spacing: 0.5px;
+            background: linear-gradient(135deg, var(--accent-blue), #06B6D4);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
             margin-bottom: 0.5rem;
         }
 
         header p {
-            font-size: 0.85rem;
+            font-size: 0.88rem;
             color: var(--text-muted);
         }
 
         .card {
             background-color: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 16px;
-            padding: 1.75rem;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+            border-radius: 12px;
+            padding: 1.5rem;
             margin-bottom: 1.5rem;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
         }
 
         .card-title {
-            font-size: 1.1rem;
+            font-size: 1.05rem;
             font-weight: 600;
-            margin-bottom: 1.25rem;
             color: var(--accent-blue);
+            margin-bottom: 1.25rem;
             border-bottom: 1px solid var(--border-color);
             padding-bottom: 0.5rem;
         }
 
         .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
             margin-bottom: 1.25rem;
         }
 
-        .form-group label {
-            display: block;
+        label {
             font-size: 0.85rem;
-            font-weight: 500;
-            margin-bottom: 0.5rem;
             color: var(--text-muted);
+            font-weight: 500;
         }
 
-        .form-group input {
-            width: 100%;
-            padding: 0.75rem 1rem;
-            background: rgba(255, 255, 255, 0.05);
+        input {
+            background-color: #0B0F19;
             border: 1px solid var(--border-color);
-            border-radius: 8px;
+            border-radius: 6px;
             color: var(--text-main);
-            font-size: 0.95rem;
+            padding: 0.65rem 0.8rem;
+            font-size: 0.9rem;
+            outline: none;
+            width: 100%;
             transition: border-color 0.2s;
         }
 
-        .form-group input:focus {
-            outline: none;
+        input:focus {
             border-color: var(--accent-blue);
         }
 
         .btn {
-            width: 100%;
-            padding: 0.75rem;
-            background-color: var(--accent-blue);
-            color: #0B0F19;
+            background: linear-gradient(135deg, var(--accent-blue), #06B6D4);
+            color: #FFFFFF;
             border: none;
-            border-radius: 8px;
-            font-size: 0.95rem;
+            border-radius: 6px;
+            padding: 0.75rem 1rem;
+            font-size: 0.9rem;
             font-weight: 600;
             cursor: pointer;
+            width: 100%;
             transition: opacity 0.2s;
             box-shadow: 0 4px 12px rgba(56, 189, 248, 0.25);
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
 
         .btn:hover {
@@ -138,15 +148,15 @@ static const char INDEX_HTML[] PROGMEM = R"rawhtml(
             position: fixed;
             bottom: 2rem;
             left: 50%;
-            transform: translateX(-50%) translateY(200px);
+            transform: translateX(-50%) translateY(100px);
             opacity: 0;
             visibility: hidden;
-            background: rgba(16, 185, 129, 0.95);
-            color: white;
-            padding: 0.75rem 1.75rem;
-            border-radius: 50px;
+            background-color: #10B981;
+            color: #FFFFFF;
+            padding: 0.6rem 1.5rem;
+            border-radius: 9999px;
             font-weight: 600;
-            box-shadow: 0 8px 24px rgba(16, 185, 129, 0.3);
+            box-shadow: 0 10px 25px -5px rgba(16, 185, 129, 0.3);
             transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.25s, visibility 0.25s;
             pointer-events: none;
             z-index: 1000;
@@ -209,9 +219,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawhtml(
             <p>AP+STA 双模在线配置与管理</p>
         </header>
 
-        <!-- WiFi 配置 -->
+        <!-- WiFi 与系统配置 -->
         <div class="card">
-            <div class="card-title">外部 Wi-Fi 配置 (STA)</div>
+            <div class="card-title">系统与网络配置</div>
             <form id="wifi-form" onsubmit="saveWifi(event)">
                 <div class="form-group">
                     <label for="ssid">Wi-Fi 网络名称 (SSID)</label>
@@ -225,6 +235,24 @@ static const char INDEX_HTML[] PROGMEM = R"rawhtml(
                     <label for="password">Wi-Fi 网络密码 (Password)</label>
                     <input type="password" id="password" name="password" placeholder="输入外部 Wi-Fi 密码">
                 </div>
+
+                <div style="margin: 1.5rem 0 1rem 0; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+                    <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--accent-blue); margin-bottom: 0.75rem;">相机与 MQTT 参数</h4>
+                </div>
+
+                <div class="form-group">
+                    <label for="name">站点标识 (STATION_NAME)</label>
+                    <input type="text" id="name" name="name" placeholder="例如: dongzhan" required>
+                </div>
+                <div class="form-group">
+                    <label for="broker">MQTT Broker 地址</label>
+                    <input type="text" id="broker" name="broker" placeholder="例如: voicevon.vicp.io" required>
+                </div>
+                <div class="form-group">
+                    <label for="port">MQTT 端口 (Port)</label>
+                    <input type="number" id="port" name="port" min="1" max="65535" placeholder="默认: 1883" required>
+                </div>
+
                 <button type="submit" class="btn">保存网络配置</button>
             </form>
         </div>
@@ -258,12 +286,15 @@ static const char INDEX_HTML[] PROGMEM = R"rawhtml(
         // 页面初始化时拉取配置数据
         async function fetchConfig() {
             try {
-                const res = await fetch('/api/wifi');
+                const res = await fetch('/api/sysconfig');
                 const data = await res.json();
                 document.getElementById('ssid').value = data.ssid || '';
                 document.getElementById('password').value = data.pass || '';
+                document.getElementById('name').value = data.name || '';
+                document.getElementById('broker').value = data.broker || '';
+                document.getElementById('port').value = data.port || 1883;
             } catch (err) {
-                console.error("Fetch wifi failed:", err);
+                console.error("Fetch config failed:", err);
             }
 
             try {
@@ -280,9 +311,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawhtml(
             const form = document.getElementById('wifi-form');
             const params = new URLSearchParams(new FormData(form));
             try {
-                const res = await fetch('/api/wifi', { method: 'POST', body: params });
+                const res = await fetch('/api/sysconfig', { method: 'POST', body: params });
                 if (res.ok) {
-                    showToast("Wi-Fi 配置已保存，设备将在后台连接！");
+                    showToast("配置已保存，网络参数已即时生效！");
                 }
             } catch (err) {
                 alert("出错: " + err);
@@ -304,18 +335,18 @@ static const char INDEX_HTML[] PROGMEM = R"rawhtml(
         }
 
         function showToast(msg) {
-            const toast = document.getElementById('toast');
-            toast.textContent = msg;
-            toast.className = 'show';
-            setTimeout(() => { toast.className = ''; }, 2500);
+            const t = document.getElementById('toast');
+            if (msg) t.textContent = msg;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 3000);
         }
 
         async function scanWifi(btn) {
-            const origText = btn.textContent;
+            const orig = btn.textContent;
             btn.textContent = "扫描中...";
             btn.disabled = true;
             const list = document.getElementById('wifi-list');
-            list.innerHTML = '<div style="padding: 0.75rem 1rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;">正在搜索附近 WiFi 热点...</div>';
+            list.innerHTML = '<div style="padding: 0.6rem 1rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;">正在搜寻 Wi-Fi...</div>';
             list.classList.add('show');
             
             try {
@@ -324,50 +355,94 @@ static const char INDEX_HTML[] PROGMEM = R"rawhtml(
                 list.innerHTML = '';
                 if (data.networks && data.networks.length > 0) {
                     data.networks.forEach(net => {
-                        if (!net.ssid) return;
-                        const item = document.createElement('div');
-                        item.className = 'wifi-item';
-                        item.innerHTML = `<span>${net.ssid}</span><span class="wifi-signal">${net.rssi} dBm</span>`;
-                        item.onclick = () => {
+                        const div = document.createElement('div');
+                        div.className = 'wifi-item';
+                        div.innerHTML = `
+                            <span>${net.ssid}</span>
+                            <span class="wifi-signal">${net.rssi} dBm</span>
+                        `;
+                        div.onclick = () => {
                             document.getElementById('ssid').value = net.ssid;
                             list.classList.remove('show');
                         };
-                        list.appendChild(item);
+                        list.appendChild(div);
                     });
                 } else {
-                    list.innerHTML = '<div style="padding: 0.75rem 1rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;">未找到可用的 WiFi 网络</div>';
+                    list.innerHTML = '<div style="padding: 0.6rem 1rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;">未发现 Wi-Fi</div>';
                 }
             } catch (err) {
-                list.innerHTML = '<div style="padding: 0.75rem 1rem; font-size: 0.85rem; color: #EF4444; text-align: center;">扫描失败</div>';
+                list.innerHTML = '<div style="padding: 0.6rem 1rem; font-size: 0.85rem; color: #EF4444; text-align: center;">扫描失败</div>';
             } finally {
-                btn.textContent = origText;
+                btn.textContent = orig;
                 btn.disabled = false;
             }
         }
 
-        fetchConfig();
+        window.onload = fetchConfig;
     </script>
 </body>
 </html>
 )rawhtml";
 
 // REST APIs
-static void handle_get_wifi() {
-    String json = "{\"ssid\":\"" + s_sta_ssid + "\",\"pass\":\"" + s_sta_password + "\"}";
+static void handle_get_sysconfig() {
+    String json = "{";
+    json += "\"ssid\":\"" + s_sta_ssid + "\",";
+    json += "\"pass\":\"" + s_sta_password + "\",";
+    json += "\"name\":\"" + s_sta_name + "\",";
+    json += "\"broker\":\"" + s_mqtt_broker + "\",";
+    json += "\"port\":" + String(s_mqtt_port);
+    json += "}";
     s_server.send(200, "application/json", json);
 }
 
-static void handle_post_wifi() {
-    if (s_server.hasArg("ssid") && s_server.hasArg("password")) {
-        s_sta_ssid = s_server.arg("ssid");
-        s_sta_password = s_server.arg("password");
-        s_prefs.putString("sta_ssid", s_sta_ssid);
-        s_prefs.putString("sta_pass", s_sta_password);
-        Serial.printf("[WebConfig] WiFi configured: SSID: %s\n", s_sta_ssid.c_str());
-        s_server.send(200, "text/plain", "OK");
-        return;
+static void handle_post_sysconfig() {
+    bool changed = false;
+    if (s_server.hasArg("ssid")) {
+        String val = s_server.arg("ssid");
+        if (val.length() > 0 && val != s_sta_ssid) {
+            s_sta_ssid = val;
+            s_prefs.putString("sta_ssid", val);
+            changed = true;
+        }
     }
-    s_server.send(400, "text/plain", "Bad Request");
+    if (s_server.hasArg("password")) {
+        String val = s_server.arg("password");
+        if (val != s_sta_password) {
+            s_sta_password = val;
+            s_prefs.putString("sta_pass", val);
+            changed = true;
+        }
+    }
+    if (s_server.hasArg("name")) {
+        String val = s_server.arg("name");
+        if (val.length() > 0 && val != s_sta_name) {
+            s_sta_name = val;
+            s_prefs.putString("sta_name", val);
+            changed = true;
+        }
+    }
+    if (s_server.hasArg("broker")) {
+        String val = s_server.arg("broker");
+        if (val.length() > 0 && val != s_mqtt_broker) {
+            s_mqtt_broker = val;
+            s_prefs.putString("mqtt_broker", val);
+            changed = true;
+        }
+    }
+    if (s_server.hasArg("port")) {
+        int val = s_server.arg("port").toInt();
+        if (val > 0 && val != s_mqtt_port) {
+            s_mqtt_port = val;
+            s_prefs.putInt("mqtt_port", val);
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        Serial.println("[WebConfig] System configurations updated in NVS.");
+    }
+    s_server.send(200, "text/plain", "OK");
 }
 
 static void handle_get_warmup() {
@@ -422,11 +497,15 @@ static void handle_wifi_scan() {
 void web_config_init() {
     // 1. 初始化 NVS 存储
     s_prefs.begin("camera_cfg", false);
-    s_sta_ssid = s_prefs.getString("sta_ssid", WIFI_SSID);
-    s_sta_password = s_prefs.getString("sta_pass", WIFI_PASSWORD);
+    s_sta_ssid = s_prefs.getString("sta_ssid", FACTORY_WIFI_SSID);
+    s_sta_password = s_prefs.getString("sta_pass", FACTORY_WIFI_PASSWORD);
     s_warmup_sec = s_prefs.getFloat("warmup_sec", 0.8f);
+    s_sta_name = s_prefs.getString("sta_name", FACTORY_STATION_NAME);
+    s_mqtt_broker = s_prefs.getString("mqtt_broker", FACTORY_MQTT_BROKER);
+    s_mqtt_port = s_prefs.getInt("mqtt_port", FACTORY_MQTT_PORT);
 
-    Serial.printf("[WebConfig] Loaded SSID: %s, Warmup: %.2f sec\n", s_sta_ssid.c_str(), s_warmup_sec);
+    Serial.printf("[WebConfig] Loaded SSID: %s, Station: %s, Broker: %s:%d\n", 
+                  s_sta_ssid.c_str(), s_sta_name.c_str(), s_mqtt_broker.c_str(), s_mqtt_port);
 
     // 2. 启动 AP_STA 模式并开启软 AP
     WiFi.mode(WIFI_AP_STA);
@@ -437,8 +516,10 @@ void web_config_init() {
     s_server.on("/", HTTP_GET, []() {
         s_server.send_P(200, "text/html", INDEX_HTML);
     });
-    s_server.on("/api/wifi", HTTP_GET, handle_get_wifi);
-    s_server.on("/api/wifi", HTTP_POST, handle_post_wifi);
+    s_server.on("/api/sysconfig", HTTP_GET, handle_get_sysconfig);
+    s_server.on("/api/sysconfig", HTTP_POST, handle_post_sysconfig);
+    s_server.on("/api/wifi", HTTP_GET, handle_get_sysconfig);
+    s_server.on("/api/wifi", HTTP_POST, handle_post_sysconfig);
     s_server.on("/api/warmup", HTTP_GET, handle_get_warmup);
     s_server.on("/api/warmup", HTTP_POST, handle_post_warmup);
     s_server.on("/api/scan", HTTP_GET, handle_wifi_scan);
@@ -467,4 +548,16 @@ String get_sta_password() {
 
 float get_warmup_sec() {
     return s_warmup_sec;
+}
+
+String get_station_name() {
+    return s_sta_name;
+}
+
+String get_mqtt_broker() {
+    return s_mqtt_broker;
+}
+
+int get_mqtt_port() {
+    return s_mqtt_port;
 }
