@@ -242,7 +242,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawhtml(
 
                 <div class="form-group">
                     <label for="name">站点标识 (STATION_NAME)</label>
-                    <input type="text" id="name" name="name" placeholder="例如: dongzhan" required>
+                    <input type="text" id="name" name="name" placeholder="例如: home" required>
                 </div>
                 <div class="form-group">
                     <label for="broker">MQTT Broker 地址</label>
@@ -500,7 +500,7 @@ void web_config_init() {
     s_sta_ssid = s_prefs.getString("sta_ssid", FACTORY_WIFI_SSID);
     s_sta_password = s_prefs.getString("sta_pass", FACTORY_WIFI_PASSWORD);
     s_warmup_sec = s_prefs.getFloat("warmup_sec", 0.8f);
-    s_sta_name = s_prefs.getString("sta_name", FACTORY_STATION_NAME);
+    s_sta_name = s_prefs.getString("sta_name", FACTORY_DEVICE_NAME);
     s_mqtt_broker = s_prefs.getString("mqtt_broker", FACTORY_MQTT_BROKER);
     s_mqtt_port = s_prefs.getInt("mqtt_port", FACTORY_MQTT_PORT);
 

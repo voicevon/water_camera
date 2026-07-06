@@ -10,7 +10,7 @@
 #define FACTORY_MQTT_PORT       1883
 
 // -------- 站点及图像配置 (拍照目标与画质) --------
-#define FACTORY_STATION_NAME    "dongzhan"  // 拍照的目标站点名称 (当 MQTT 指令内容与该站点匹配时触发拍照)
+#define FACTORY_DEVICE_NAME     "home"      // 拍照的目标站点名称 (当 MQTT 指令内容与该站点匹配时触发拍照)
 
 // 帧大小配置（图像尺寸分辨率）
 // 可选分辨率：FRAMESIZE_UXGA (1600x1200), FRAMESIZE_SXGA (1280x1024), FRAMESIZE_XGA (1024x768), 
