@@ -1,55 +1,37 @@
 #include "network_handler.h"
 #include <Arduino.h>
-#include <HTTPClient.h>
 #include "config.h"
 #include "web_config.h"
 
-// 备用 DNS 解析：结合标准 DNS 与 HTTP-DNS，绕过本地代理劫持 (Fake-IP)
+// RAII Lock helper for thread-safe MQTT operations
+class MqttLock {
+public:
+    MqttLock(SemaphoreHandle_t mutex) : _mutex(mutex) {
+        if (_mutex) {
+            xSemaphoreTake(_mutex, portMAX_DELAY);
+        }
+    }
+    ~MqttLock() {
+        if (_mutex) {
+            xSemaphoreGive(_mutex);
+        }
+    }
+private:
+    SemaphoreHandle_t _mutex;
+};
+
+// 标准 DNS 解析：仅使用本地/ISP 默认 DNS 服务器
 static IPAddress resolve_broker_ip() {
     IPAddress resolvedIP;
     String broker = get_mqtt_broker();
     
-    // 1. 尝试使用标准的 DNS 解析
     if (WiFi.hostByName(broker.c_str(), resolvedIP)) {
-        // 如果解析出来的 IP 属于 Clash 的 Fake-IP 范围 (198.18.x.x)，说明被本地代理劫持且 ESP32 无法直接路由
-        if (resolvedIP[0] == 198 && resolvedIP[1] == 18) {
-            Serial.printf("[DNS] Resolved to Fake-IP %s, bypassing...\n", resolvedIP.toString().c_str());
-        } else {
-            Serial.printf("[DNS] Successfully resolved %s to %s via standard DNS\n", broker.c_str(), resolvedIP.toString().c_str());
-            return resolvedIP;
-        }
+        Serial.printf("[DNS] Successfully resolved %s to %s via standard DNS\n", broker.c_str(), resolvedIP.toString().c_str());
+        return resolvedIP;
     } else {
         Serial.printf("[DNS] Standard DNS failed for %s\n", broker.c_str());
+        return IPAddress(0, 0, 0, 0);
     }
-    
-    // 2. 备用方案：使用 HTTP-DNS (通过 TCP 80 端口直接查询 223.5.5.5，绕过本地 53 端口 DNS 劫持)
-    Serial.println("[DNS] Attempting HTTP-DNS resolution via AliDNS...");
-    HTTPClient http;
-    String url = "http://223.5.5.5/resolve?name=" + broker + "&type=A";
-    http.begin(url);
-    http.setTimeout(3000); // 3 秒超时
-    
-    int httpCode = http.GET();
-    if (httpCode == HTTP_CODE_OK) {
-        String payload = http.getString();
-        int index = payload.indexOf("\"data\":\"");
-        if (index != -1) {
-            int start = index + 8;
-            int end = payload.indexOf("\"", start);
-            if (end != -1) {
-                String ipStr = payload.substring(start, end);
-                if (resolvedIP.fromString(ipStr.c_str())) {
-                    Serial.printf("[DNS] HTTP-DNS successfully resolved %s to %s\n", broker.c_str(), resolvedIP.toString().c_str());
-                    return resolvedIP;
-                }
-            }
-        }
-    } else {
-        Serial.printf("[DNS] HTTP-DNS request failed, HTTP Code: %d\n", httpCode);
-    }
-    http.end();
-    
-    return IPAddress(0, 0, 0, 0);
 }
 
 // 共享状态变量，用于后台异步 DNS 解析与 MQTT 连接任务
@@ -71,24 +53,27 @@ void mqtt_connect_task(void* pvParameters) {
         }
     }
     
-    // 配置服务器地址
-    if (s_resolved_broker_ip[0] != 0) {
-        network._mqttClient.setServer(s_resolved_broker_ip, get_mqtt_port());
-    } else {
-        network._mqttClient.setServer(get_mqtt_broker().c_str(), get_mqtt_port());
-    }
-    
-    // 执行阻塞的 TCP 连接与 MQTT 握手
-    Serial.println("[MQTT Task] Attempting connection to Broker...");
-    String clientId = "ESP32Camera-";
-    clientId += String(random(0xffff), HEX);
-    
-    if (network._mqttClient.connect(clientId.c_str())) {
-        Serial.println("[MQTT Task] Connected successfully!");
-        network._mqttClient.subscribe(MQTT_CMD_TOPIC);
-        Serial.printf("[MQTT Task] Subscribed to topic: %s\n", MQTT_CMD_TOPIC);
-    } else {
-        Serial.printf("[MQTT Task] Connection failed, state = %d\n", network._mqttClient.state());
+    {
+        MqttLock lock(network._mqttMutex);
+        // 配置服务器地址
+        if (s_resolved_broker_ip[0] != 0) {
+            network._mqttClient.setServer(s_resolved_broker_ip, get_mqtt_port());
+        } else {
+            network._mqttClient.setServer(get_mqtt_broker().c_str(), get_mqtt_port());
+        }
+        
+        // 执行阻塞的 TCP 连接与 MQTT 握手
+        Serial.println("[MQTT Task] Attempting connection to Broker...");
+        String clientId = "ESP32Camera-";
+        clientId += String(random(0xffff), HEX);
+        
+        if (network._mqttClient.connect(clientId.c_str())) {
+            Serial.println("[MQTT Task] Connected successfully!");
+            network._mqttClient.subscribe(MQTT_CMD_TOPIC);
+            Serial.printf("[MQTT Task] Subscribed to topic: %s\n", MQTT_CMD_TOPIC);
+        } else {
+            Serial.printf("[MQTT Task] Connection failed, state = %d\n", network._mqttClient.state());
+        }
     }
     
     s_mqtt_connecting = false;
@@ -154,7 +139,9 @@ static void scan_wifi_networks() {
     Serial.println("------------------------------------");
 }
 
-NetworkHandler::NetworkHandler() : _mqttClient(_espClient), _lastReconnectTime(0) {}
+NetworkHandler::NetworkHandler() : _mqttClient(_espClient), _lastReconnectTime(0), _mqttMutex(NULL) {
+    _mqttMutex = xSemaphoreCreateMutex();
+}
 
 void NetworkHandler::init() {
     _wifiInit();
@@ -187,15 +174,23 @@ void NetworkHandler::loop(unsigned long now) {
     _handleWifiReconnect(now);
 
     if (WiFi.status() == WL_CONNECTED) {
-        if (!_mqttClient.connected()) {
+        bool connected = false;
+        {
+            MqttLock lock(_mqttMutex);
+            connected = _mqttClient.connected();
+        }
+        
+        if (!connected) {
             _reconnectMqtt(now);
         } else {
+            MqttLock lock(_mqttMutex);
             _mqttClient.loop();
         }
     }
 }
 
 bool NetworkHandler::publishPhoto(const uint8_t* data, size_t len) {
+    MqttLock lock(_mqttMutex);
     if (!_mqttClient.connected()) {
         Serial.println("[MQTT] Disconnected, skip publishing.");
         return false;
@@ -234,10 +229,12 @@ void NetworkHandler::setMqttCallback(void (*callback)(char*, byte*, unsigned int
 }
 
 bool NetworkHandler::isConnected() {
+    MqttLock lock(_mqttMutex);
     return _mqttClient.connected();
 }
 
 void NetworkHandler::processMqtt() {
+    MqttLock lock(_mqttMutex);
     if (_mqttClient.connected()) {
         _mqttClient.loop();
     }

@@ -5,7 +5,7 @@
 #include "web_config.h"
 
 // 异步拍照任务与重试状态机控制变量
-static volatile bool s_need_take_photo = false;
+static bool s_need_take_photo = false;
 static bool s_in_retry_mode = false;
 static int s_retry_count = 0;
 static unsigned long s_last_capture_attempt_ms = 0;

@@ -48,6 +48,7 @@ private:
     WiFiClient _espClient;
     PubSubClient _mqttClient;
     unsigned long _lastReconnectTime;
+    SemaphoreHandle_t _mqttMutex;
 
     void _wifiInit();
     void _reconnectMqtt(unsigned long now);
