@@ -36,7 +36,7 @@ static IPAddress resolve_broker_ip() {
 
 // 共享状态变量，用于后台异步 DNS 解析与 MQTT 连接任务
 static IPAddress s_resolved_broker_ip = IPAddress(0, 0, 0, 0);
-static bool s_mqtt_connecting = false;
+static volatile bool s_mqtt_connecting = false;
 static unsigned long s_last_dns_resolve_ms = 0;
 
 void mqtt_connect_task(void* pvParameters) {
@@ -174,6 +174,12 @@ void NetworkHandler::loop(unsigned long now) {
     _handleWifiReconnect(now);
 
     if (WiFi.status() == WL_CONNECTED) {
+        // 后台 MQTT 连接任务正在运行（持有 _mqttMutex 并执行阻塞的 DNS+TCP+握手），
+        // 主线程直接跳过，避免被 portMAX_DELAY 阻塞导致 Web 服务无法响应。
+        if (s_mqtt_connecting) {
+            return;
+        }
+
         bool connected = false;
         {
             MqttLock lock(_mqttMutex);
@@ -190,6 +196,11 @@ void NetworkHandler::loop(unsigned long now) {
 }
 
 bool NetworkHandler::publishPhoto(const uint8_t* data, size_t len) {
+    // 后台 MQTT 连接任务持锁期间跳过发布，避免主线程被阻塞
+    if (s_mqtt_connecting) {
+        Serial.println("[MQTT] publishPhoto: MQTT reconnecting in background, skip.");
+        return false;
+    }
     MqttLock lock(_mqttMutex);
     if (!_mqttClient.connected()) {
         Serial.println("[MQTT] Disconnected, skip publishing.");
@@ -229,11 +240,19 @@ void NetworkHandler::setMqttCallback(void (*callback)(char*, byte*, unsigned int
 }
 
 bool NetworkHandler::isConnected() {
+    // 后台连接任务持锁期间直接返回 false，避免主线程被阻塞
+    if (s_mqtt_connecting) {
+        return false;
+    }
     MqttLock lock(_mqttMutex);
     return _mqttClient.connected();
 }
 
 void NetworkHandler::processMqtt() {
+    // 后台连接任务持锁期间跳过，避免主线程被阻塞
+    if (s_mqtt_connecting) {
+        return;
+    }
     MqttLock lock(_mqttMutex);
     if (_mqttClient.connected()) {
         _mqttClient.loop();
