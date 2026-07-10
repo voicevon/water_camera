@@ -29,8 +29,8 @@ void trigger_photo_capture() {
 void mqtt_callback(char* topic, byte* payload, unsigned int length) {
     Serial.printf("[MQTT RX] Topic: %s\n", topic);
     if (strcmp(topic, MQTT_CMD_TOPIC) == 0) {
-        char payload_str[32];
-        unsigned int len = length < 31 ? length : 31;
+        char payload_str[128];
+        unsigned int len = length < 127 ? length : 127;
         memcpy(payload_str, payload, len);
         payload_str[len] = '\0';
         
@@ -239,6 +239,8 @@ void loop() {
     }
 
     // 4. 检查是否连续 60 秒没有进行过任何拍摄（需处于在线状态，且无未决拍照任务或重试任务）
+    // 防护意图：仅在既无未决正常拍照任务、也无重试状态机运行的纯空闲状态下，才允许进行亮度评估，
+    // 避免非必要的本地评估拍照更新 s_last_photo_time_ms 从而打乱正常拍照任务的触发与重试节奏。
     if (is_online && !s_need_take_photo && !s_in_retry_mode) {
         if (now - s_last_photo_time_ms >= 60000UL) {
             Serial.println("[Idle] No photo captured for 60 seconds. Triggering local evaluation photo...");

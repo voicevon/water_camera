@@ -14,13 +14,34 @@ static WebServer s_server(80);
 //  REST API 处理函数
 // ============================================================
 
+// 辅助转义函数：处理 JSON 中的特殊字符，防止手动拼接出现不合法 JSON
+static String escape_json_string(const String& input) {
+    String output = "";
+    for (size_t i = 0; i < input.length(); i++) {
+        char c = input[i];
+        if (c == '"') output += "\\\"";
+        else if (c == '\\') output += "\\\\";
+        else if (c == '\n') output += "\\n";
+        else if (c == '\r') output += "\\r";
+        else if (c == '\t') output += "\\t";
+        else if (c < 32) {
+            char buf[8];
+            snprintf(buf, sizeof(buf), "\\u%04x", c);
+            output += buf;
+        } else {
+            output += c;
+        }
+    }
+    return output;
+}
+
 // GET /api/sysconfig — 返回系统配置 JSON
 static void handle_get_sysconfig() {
     String json = "{";
-    json += "\"ssid\":\"" + get_sta_ssid() + "\",";
-    json += "\"pass\":\"" + get_sta_password() + "\",";
-    json += "\"name\":\"" + get_station_name() + "\",";
-    json += "\"broker\":\"" + get_mqtt_broker() + "\",";
+    json += "\"ssid\":\"" + escape_json_string(get_sta_ssid()) + "\",";
+    json += "\"pass\":\"" + escape_json_string(get_sta_password()) + "\",";
+    json += "\"name\":\"" + escape_json_string(get_station_name()) + "\",";
+    json += "\"broker\":\"" + escape_json_string(get_mqtt_broker()) + "\",";
     json += "\"port\":" + String(get_mqtt_port());
     json += "}";
     s_server.send(200, "application/json", json);
@@ -60,9 +81,34 @@ static void handle_post_warmup() {
     s_server.send(400, "text/plain", "Bad Request");
 }
 
-// GET /api/scan — 扫描附近 WiFi 并按信号强度排序返回
+// 增加扫描状态常量的语义宏定义，提高代码可读性
+#define WIFI_SCAN_STATUS_RUNNING  WIFI_SCAN_RUNNING  // 正在扫描中 (-1)
+#define WIFI_SCAN_STATUS_FAILED   WIFI_SCAN_FAILED   // 扫描发生失败或闲置状态 (-2)
+
+// GET /api/scan — 扫描附近 WiFi 并按信号强度排序返回（非阻塞异步轮询设计）
 static void handle_wifi_scan() {
-    int n = WiFi.scanNetworks(false, false);
+    bool refresh = s_server.hasArg("refresh");
+    int16_t status = WiFi.scanComplete();
+
+    if (refresh) {
+        // 如果需要刷新且当前已有旧扫描结果，先清理
+        if (status >= 0) {
+            WiFi.scanDelete();
+        }
+        // 触发一次新的异步扫描，scanNetworks 第二个参数 showHidden=false
+        WiFi.scanNetworks(true, false);
+        s_server.send(200, "application/json", "{\"status\":\"scanning\"}");
+        return;
+    }
+
+    if (status == WIFI_SCAN_STATUS_RUNNING || status == WIFI_SCAN_STATUS_FAILED) {
+        // 正在扫描中或由于未显式触发处于失败/无状态，提示前端继续轮询
+        s_server.send(200, "application/json", "{\"status\":\"scanning\"}");
+        return;
+    }
+
+    // 扫描成功完成 (status >= 0, 即 status 存储了扫描到的网络数)
+    int n = status;
     String json = "{\"networks\":[";
     if (n > 0) {
         int indices[n];
@@ -79,13 +125,15 @@ static void handle_wifi_scan() {
         for (int i = 0; i < n; i++) {
             int idx = indices[i];
             json += "{";
-            json += "\"ssid\":\"" + WiFi.SSID(idx) + "\",";
+            json += "\"ssid\":\"" + escape_json_string(WiFi.SSID(idx)) + "\",";
             json += "\"rssi\":" + String(WiFi.RSSI(idx));
             json += "}";
             if (i < n - 1) json += ",";
         }
     }
     json += "]}";
+    
+    // 清空扫描结果缓存，使状态恢复为 IDLE
     WiFi.scanDelete();
     s_server.send(200, "application/json", json);
 }

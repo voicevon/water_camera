@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include "config.h"
 #include "web_config.h"
+#include <atomic>
 
 // RAII Lock helper for thread-safe MQTT operations
 class MqttLock {
@@ -36,7 +37,7 @@ static IPAddress resolve_broker_ip() {
 
 // 共享状态变量，用于后台异步 DNS 解析与 MQTT 连接任务
 static IPAddress s_resolved_broker_ip = IPAddress(0, 0, 0, 0);
-static volatile bool s_mqtt_connecting = false;
+static std::atomic<bool> s_mqtt_connecting(false);
 static unsigned long s_last_dns_resolve_ms = 0;
 
 void mqtt_connect_task(void* pvParameters) {

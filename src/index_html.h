@@ -335,30 +335,58 @@ static const char INDEX_HTML[] PROGMEM = R"rawhtml(
             list.innerHTML = '<div style="padding: 0.6rem 1rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;">正在搜寻 Wi-Fi...</div>';
             list.classList.add('show');
 
+            let pollInterval;
+
+            async function poll() {
+                try {
+                    const res = await fetch('/api/scan');
+                    const data = await res.json();
+                    if (data.status === "scanning") {
+                        return; // 还在扫描，等待下一次轮询
+                    }
+                    
+                    clearInterval(pollInterval);
+                    list.innerHTML = '';
+                    if (data.networks && data.networks.length > 0) {
+                        data.networks.forEach(net => {
+                            const div = document.createElement('div');
+                            div.className = 'wifi-item';
+                            div.innerHTML = `
+                                <span>${net.ssid}</span>
+                                <span class="wifi-signal">${net.rssi} dBm</span>
+                            `;
+                            div.onclick = () => {
+                                document.getElementById('ssid').value = net.ssid;
+                                list.classList.remove('show');
+                            };
+                            list.appendChild(div);
+                        });
+                    } else {
+                        list.innerHTML = '<div style="padding: 0.6rem 1rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;">未发现 Wi-Fi</div>';
+                    }
+                    btn.textContent = orig;
+                    btn.disabled = false;
+                } catch (err) {
+                    clearInterval(pollInterval);
+                    list.innerHTML = '<div style="padding: 0.6rem 1rem; font-size: 0.85rem; color: #EF4444; text-align: center;">扫描失败</div>';
+                    btn.textContent = orig;
+                    btn.disabled = false;
+                }
+            }
+
             try {
-                const res = await fetch('/api/scan');
+                // 启动扫描（加入 refresh=1 强制开始新一轮异步扫描）
+                const res = await fetch('/api/scan?refresh=1');
                 const data = await res.json();
-                list.innerHTML = '';
-                if (data.networks && data.networks.length > 0) {
-                    data.networks.forEach(net => {
-                        const div = document.createElement('div');
-                        div.className = 'wifi-item';
-                        div.innerHTML = `
-                            <span>${net.ssid}</span>
-                            <span class="wifi-signal">${net.rssi} dBm</span>
-                        `;
-                        div.onclick = () => {
-                            document.getElementById('ssid').value = net.ssid;
-                            list.classList.remove('show');
-                        };
-                        list.appendChild(div);
-                    });
+                if (data.status === "scanning") {
+                    pollInterval = setInterval(poll, 1000);
                 } else {
-                    list.innerHTML = '<div style="padding: 0.6rem 1rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;">未发现 Wi-Fi</div>';
+                    list.innerHTML = '<div style="padding: 0.6rem 1rem; font-size: 0.85rem; color: #EF4444; text-align: center;">扫描启动失败</div>';
+                    btn.textContent = orig;
+                    btn.disabled = false;
                 }
             } catch (err) {
-                list.innerHTML = '<div style="padding: 0.6rem 1rem; font-size: 0.85rem; color: #EF4444; text-align: center;">扫描失败</div>';
-            } finally {
+                list.innerHTML = '<div style="padding: 0.6rem 1rem; font-size: 0.85rem; color: #EF4444; text-align: center;">连接失败</div>';
                 btn.textContent = orig;
                 btn.disabled = false;
             }

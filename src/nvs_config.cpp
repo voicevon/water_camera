@@ -30,7 +30,7 @@ static int    s_mqtt_port    = 1883;
 //  NVS 初始化
 // ============================================================
 void nvs_config_init() {
-    s_prefs.begin(NVS_NAMESPACE, false);
+    s_prefs.begin(NVS_NAMESPACE, true); // 只读模式加载参数
 
     s_sta_ssid     = s_prefs.getString(NVS_KEY_SSID,     FACTORY_WIFI_SSID);
     s_sta_password = s_prefs.getString(NVS_KEY_PASS,     FACTORY_WIFI_PASSWORD);
@@ -38,6 +38,8 @@ void nvs_config_init() {
     s_sta_name     = s_prefs.getString(NVS_KEY_NAME,     FACTORY_DEVICE_NAME);
     s_mqtt_broker  = s_prefs.getString(NVS_KEY_BROKER,   FACTORY_MQTT_BROKER);
     s_mqtt_port    = s_prefs.getInt(NVS_KEY_PORT,        FACTORY_MQTT_PORT);
+
+    s_prefs.end(); // 加载完立即释放句柄
 
     Serial.printf("[NvsConfig] Loaded SSID: %s, Station: %s, Broker: %s:%d\n",
                   s_sta_ssid.c_str(), s_sta_name.c_str(),
@@ -60,14 +62,18 @@ int    get_mqtt_port()    { return s_mqtt_port; }
 bool nvs_set_sta_ssid(const String& val) {
     if (val.length() == 0 || val == s_sta_ssid) return false;
     s_sta_ssid = val;
+    s_prefs.begin(NVS_NAMESPACE, false);
     s_prefs.putString(NVS_KEY_SSID, val);
+    s_prefs.end();
     return true;
 }
 
 bool nvs_set_sta_password(const String& val) {
     if (val == s_sta_password) return false;
     s_sta_password = val;
+    s_prefs.begin(NVS_NAMESPACE, false);
     s_prefs.putString(NVS_KEY_PASS, val);
+    s_prefs.end();
     return true;
 }
 
@@ -75,27 +81,35 @@ bool nvs_set_warmup_sec(float val) {
     if (val < 0.1f || val > 10.0f) return false;
     if (val == s_warmup_sec) return false;
     s_warmup_sec = val;
+    s_prefs.begin(NVS_NAMESPACE, false);
     s_prefs.putFloat(NVS_KEY_WARMUP, val);
+    s_prefs.end();
     return true;
 }
 
 bool nvs_set_station_name(const String& val) {
     if (val.length() == 0 || val == s_sta_name) return false;
     s_sta_name = val;
+    s_prefs.begin(NVS_NAMESPACE, false);
     s_prefs.putString(NVS_KEY_NAME, val);
+    s_prefs.end();
     return true;
 }
 
 bool nvs_set_mqtt_broker(const String& val) {
     if (val.length() == 0 || val == s_mqtt_broker) return false;
     s_mqtt_broker = val;
+    s_prefs.begin(NVS_NAMESPACE, false);
     s_prefs.putString(NVS_KEY_BROKER, val);
+    s_prefs.end();
     return true;
 }
 
 bool nvs_set_mqtt_port(int val) {
     if (val <= 0 || val == s_mqtt_port) return false;
     s_mqtt_port = val;
+    s_prefs.begin(NVS_NAMESPACE, false);
     s_prefs.putInt(NVS_KEY_PORT, val);
+    s_prefs.end();
     return true;
 }

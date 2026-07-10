@@ -6,13 +6,13 @@
 
 // 自定义日志输出拦截函数，用于将 EV-EOF-OVF 缩写展开为带括号的全称与解释
 static int custom_log_vprintf(const char *format, va_list args) {
-    char buf[256];
+    char buf[512];
     va_list args_copy;
     va_copy(args_copy, args);
     int len = vsnprintf(buf, sizeof(buf), format, args_copy);
     va_end(args_copy);
 
-    if (len > 0) {
+    if (len > 0 && len < (int)sizeof(buf)) {
         if (strstr(buf, "EV-EOF-OVF") != NULL) {
             // 拦截并输出包含全名的详细调试信息
             printf("cam_hal: EV-EOF-OVF (Event End of Frame Overflow: DMA FIFO Buffer Overflow)\n");
@@ -123,7 +123,8 @@ camera_fb_t* CameraHandler::capture() {
         Serial.printf("[Camera] Clear old frame cache succeeded. Took %u ms.\n", duration);
         esp_camera_fb_return(fb);
     } else {
-        Serial.printf("[Camera] Clear old frame cache failed (nullptr returned). Took %u ms.\n", duration);
+        Serial.printf("[Camera] Clear old frame cache failed (nullptr returned). Took %u ms. Waiting 100ms for sensor recovery...\n", duration);
+        delay(100);
     }
     
     Serial.println("[Camera] Taking actual photo...");
@@ -172,7 +173,7 @@ int CameraHandler::get_yavg() {
         Serial.println("[Camera] Failed to get sensor pointer for YAVG!");
         return -1;
     }
-    // 0x12F: 1 表示 Bank 1，2F 是 YAVG 寄存器地址
+    // esp-camera 编码：0x100=Bank1 (DSP), 0x2F=YAVG 寄存器偏移，合并为 0x12F
     int yavg = s->get_reg(s, 0x12F, 0xFF);
     Serial.printf("[Camera] Current YAVG: %d\n", yavg);
     return yavg;
