@@ -28,6 +28,14 @@ public:
     bool publishPhoto(const uint8_t* data, size_t len);
 
     /**
+     * @brief 发送小型文本消息到指定 MQTT Topic（用于报警、状态上报等）
+     * @param topic MQTT 主题
+     * @param payload 消息内容（空结尾字符串）
+     * @return bool 是否成功发布
+     */
+    bool publishText(const char* topic, const char* payload);
+
+    /**
      * @brief 设置 MQTT 回调函数
      * @param callback 传入的回调指针
      */

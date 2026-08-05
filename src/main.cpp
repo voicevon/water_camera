@@ -3,6 +3,8 @@
 #include "network_handler.h"
 #include "config.h"
 #include "web_config.h"
+#include "nvs_config.h"
+#include "mutation_detector.h"
 
 // 异步拍照任务与重试状态机控制变量
 static bool s_need_take_photo = false;
@@ -130,15 +132,16 @@ void setup() {
 
 void evaluate_brightness() {
     int yavg = camera.get_yavg();
+    int thresh = get_brightness_thresh();
     if (yavg >= 0) {
-        if (yavg < AMBIENT_BRIGHTNESS_THRESHOLD) {
+        if (yavg < thresh) {
             s_use_flash_next_time = true;
             Serial.printf("[Evaluation] Brightness is low (%d < %d). Flash will be ENABLED next time.\n", 
-                          yavg, AMBIENT_BRIGHTNESS_THRESHOLD);
+                          yavg, thresh);
         } else {
             s_use_flash_next_time = false;
             Serial.printf("[Evaluation] Brightness is sufficient (%d >= %d). Flash will be DISABLED next time.\n", 
-                          yavg, AMBIENT_BRIGHTNESS_THRESHOLD);
+                          yavg, thresh);
         }
     } else {
         Serial.println("[Evaluation] Failed to read brightness. Keeping previous flash setting.");
@@ -238,25 +241,29 @@ void loop() {
         trigger_photo_capture();
     }
 
-    // 4. 检查是否连续 60 秒没有进行过任何拍摄（需处于在线状态，且无未决拍照任务或重试任务）
+    // 4. 检查是否连续空闲足够长时间没有进行过任何拍摄（需处于在线状态，且无未决拍照任务或重试任务）
     // 防护意图：仅在既无未决正常拍照任务、也无重试状态机运行的纯空闲状态下，才允许进行亮度评估，
     // 避免非必要的本地评估拍照更新 s_last_photo_time_ms 从而打乱正常拍照任务的触发与重试节奏。
     if (is_online && !s_need_take_photo && !s_in_retry_mode) {
-        if (now - s_last_photo_time_ms >= 60000UL) {
-            Serial.println("[Idle] No photo captured for 60 seconds. Triggering local evaluation photo...");
-            
+        // 间隔时间由 NVS 可配置参数实时控制（替换原硬编码 60 秒）
+        unsigned long idle_interval_ms = (unsigned long)get_mutation_interval_sec() * 1000UL;
+        if (now - s_last_photo_time_ms >= idle_interval_ms) {
+            Serial.printf("[Idle] No photo captured for %lu seconds. Triggering local evaluation photo...\n",
+                          idle_interval_ms / 1000UL);
+
             // 确保关闭闪光灯（评估拍摄强制不使用闪光灯）
             digitalWrite(FLASH_GPIO_NUM, LOW);
-            
-            // 本地拍照并释放，只用于评估亮度
+
+            // 本地拍照并释放，用于评估亮度和突变检测
             camera_fb_t* fb = camera.capture();
             if (fb) {
-                evaluate_brightness();
+                evaluate_brightness(); // 逐帧评估下次拍照是否需要闪光灯
+                mutationDetector.processFrame(fb); // 突变检测（复用同一帧，无额外拍照开销）
                 camera.release(fb);
             } else {
                 Serial.println("[Idle] Failed to capture evaluation photo.");
             }
-            
+
             // 无论拍照成功与否，更新拍照时间戳，重新开始计时
             s_last_photo_time_ms = now;
         }

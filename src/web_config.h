@@ -29,6 +29,11 @@ String get_sta_password();
 float get_warmup_sec();
 
 /**
+ * @brief 从 NVS 获取最低环境亮度阈值 (0-255，低于此值下次自动开闪光灯)
+ */
+int get_brightness_thresh();
+
+/**
  * @brief 从 NVS 获取配置的站点名称 (STATION_NAME)
  */
 String get_station_name();

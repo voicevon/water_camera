@@ -236,6 +236,21 @@ bool NetworkHandler::publishPhoto(const uint8_t* data, size_t len) {
     return false;
 }
 
+bool NetworkHandler::publishText(const char* topic, const char* payload) {
+    if (s_mqtt_connecting) {
+        Serial.println("[MQTT] publishText: MQTT reconnecting in background, skip.");
+        return false;
+    }
+    MqttLock lock(_mqttMutex);
+    if (!_mqttClient.connected()) {
+        Serial.println("[MQTT] publishText: Disconnected, skip.");
+        return false;
+    }
+    bool ok = _mqttClient.publish(topic, payload);
+    Serial.printf("[MQTT] publishText topic=%s %s\n", topic, ok ? "OK" : "FAILED");
+    return ok;
+}
+
 void NetworkHandler::setMqttCallback(void (*callback)(char*, byte*, unsigned int)) {
     _mqttClient.setCallback(callback);
 }

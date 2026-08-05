@@ -1,5 +1,6 @@
 #include "web_config.h"
 #include "nvs_config.h"
+#include "mutation_detector.h"
 #include "index_html.h"
 #include "config.h"
 #include <WiFi.h>
@@ -62,23 +63,90 @@ static void handle_post_sysconfig() {
     s_server.send(200, "text/plain", "OK");
 }
 
-// GET /api/warmup — 返回闪光灯预热时间
+// GET /api/warmup — 返回相机参数 JSON（包含预热时间与最低亮度阈值）
 static void handle_get_warmup() {
-    String json = "{\"warmup\":" + String(get_warmup_sec(), 2) + "}";
+    String json = "{";
+    json += "\"warmup\":" + String(get_warmup_sec(), 2) + ",";
+    json += "\"bright_thresh\":" + String(get_brightness_thresh());
+    json += "}";
     s_server.send(200, "application/json", json);
 }
 
-// POST /api/warmup — 保存闪光灯预热时间到 NVS
+// POST /api/warmup — 保存相机参数到 NVS
 static void handle_post_warmup() {
+    bool changed = false;
     if (s_server.hasArg("warmup")) {
         float warmup = s_server.arg("warmup").toFloat();
-        if (nvs_set_warmup_sec(warmup)) {
-            Serial.printf("[WebConfig] Warm-up time updated to %.2f seconds\n", warmup);
-            s_server.send(200, "text/plain", "OK");
+        changed |= nvs_set_warmup_sec(warmup);
+    }
+    if (s_server.hasArg("bright_thresh")) {
+        int thresh = s_server.arg("bright_thresh").toInt();
+        changed |= nvs_set_brightness_thresh(thresh);
+    }
+
+    if (changed) {
+        Serial.printf("[WebConfig] Camera parameters updated. Warmup: %.2fs, Brightness Thresh: %d\n",
+                      get_warmup_sec(), get_brightness_thresh());
+    }
+    s_server.send(200, "text/plain", "OK");
+}
+
+// GET /api/mutation — 返回突变检测配置 JSON
+static void handle_get_mutation() {
+    String json = "{";
+    json += "\"enable\":"    + String(get_mutation_enable() ? "true" : "false") + ",";
+    json += "\"interval\":" + String(get_mutation_interval_sec()) + ",";
+    json += "\"thresh\":"   + String(get_mutation_block_thresh(), 3) + ",";
+    json += "\"min_blocks\":" + String(get_mutation_min_blocks()) + ",";
+    json += "\"alarm_topic\":\"" + escape_json_string(String(MQTT_ALARM_TOPIC) + "/" + get_station_name()) + "\"";
+    json += "}";
+    s_server.send(200, "application/json", json);
+}
+
+// GET /api/mutation/status — 返回突变检测调试监控数据 JSON
+static void handle_get_mutation_status() {
+    String json = "{";
+    json += "\"y_global\":"  + String(mutationDetector.getLastYGlobal(), 1) + ",";
+    json += "\"c_changed\":" + String(mutationDetector.getLastCChanged()) + ",";
+    json += "\"alarm\":"     + String(mutationDetector.getLastAlarmStatus() ? "true" : "false") + ",";
+    json += "\"alarm_topic\":\"" + escape_json_string(String(MQTT_ALARM_TOPIC) + "/" + get_station_name()) + "\",";
+    
+    uint32_t last_update = mutationDetector.getLastUpdateMs();
+    uint32_t sec_ago = (last_update > 0) ? (millis() - last_update) / 1000 : 999999;
+    json += "\"sec_ago\":" + String(sec_ago);
+    json += "}";
+    s_server.send(200, "application/json", json);
+}
+
+// POST /api/mutation — 保存突变检测配置到 NVS 并实时生效
+static void handle_post_mutation() {
+    bool changed = false;
+    if (s_server.hasArg("enable")) {
+        // #4 修复：明确区分 true/false 值，非法值返回 400
+        String v = s_server.arg("enable");
+        if (v == "1" || v == "true") {
+            changed |= nvs_set_mutation_enable(true);
+        } else if (v == "0" || v == "false") {
+            changed |= nvs_set_mutation_enable(false);
+        } else {
+            Serial.printf("[WebConfig] Invalid 'enable' value: %s\n", v.c_str());
+            s_server.send(400, "text/plain", "Bad Request: 'enable' must be 0/1/true/false");
             return;
         }
     }
-    s_server.send(400, "text/plain", "Bad Request");
+    if (s_server.hasArg("interval")) {
+        changed |= nvs_set_mutation_interval_sec(s_server.arg("interval").toInt());
+    }
+    if (s_server.hasArg("thresh")) {
+        changed |= nvs_set_mutation_block_thresh(s_server.arg("thresh").toFloat());
+    }
+    if (s_server.hasArg("min_blocks")) {
+        changed |= nvs_set_mutation_min_blocks(s_server.arg("min_blocks").toInt());
+    }
+    if (changed) {
+        Serial.println("[WebConfig] Mutation detection parameters updated.");
+    }
+    s_server.send(200, "text/plain", "OK");
 }
 
 // 增加扫描状态常量的语义宏定义，提高代码可读性
@@ -148,8 +216,8 @@ void web_config_init() {
 
     // 2. 启动 AP_STA 双模，开启软 AP 供配置接入
     WiFi.mode(WIFI_AP_STA);
-    WiFi.softAP("WaterCamera_AP", "12344321");
-    Serial.printf("[WebConfig] SoftAP started. SSID: \"WaterCamera_AP\", IP: %s\n",
+    WiFi.softAP("AP_Camera", "12344321");
+    Serial.printf("[WebConfig] SoftAP started. SSID: \"AP_Camera\", IP: %s\n",
                   WiFi.softAPIP().toString().c_str());
 
     // 3. 注册路由
@@ -163,6 +231,9 @@ void web_config_init() {
     s_server.on("/api/warmup",    HTTP_GET,  handle_get_warmup);
     s_server.on("/api/warmup",    HTTP_POST, handle_post_warmup);
     s_server.on("/api/scan",      HTTP_GET,  handle_wifi_scan);
+    s_server.on("/api/mutation",        HTTP_GET,  handle_get_mutation);
+    s_server.on("/api/mutation",        HTTP_POST, handle_post_mutation);
+    s_server.on("/api/mutation/status", HTTP_GET,  handle_get_mutation_status);
 
     s_server.begin();
     Serial.println("[WebConfig] Embedded Web Server started on port 80");
@@ -173,7 +244,7 @@ void web_config_loop() {
     if (WiFi.getMode() == WIFI_STA) {
         Serial.println("[WebConfig] WiFi mode was reverted to STA. Restoring AP_STA and restarting softAP...");
         WiFi.mode(WIFI_AP_STA);
-        WiFi.softAP("WaterCamera_AP", "12344321");
+        WiFi.softAP("AP_Camera", "12344321");
     }
     s_server.handleClient();
 }

@@ -24,7 +24,8 @@
 #define CAMERA_JPEG_QUALITY     8  // 默认设为 12，提供较大的压缩率以减小文件体积
 
 // -------- MQTT Topic 配置 --------
-#define MQTT_CMD_TOPIC  "water/photo/take"
+#define MQTT_CMD_TOPIC    "water/photo/take"
+#define MQTT_ALARM_TOPIC  "water/photo/mutation_alarm"  // 突变检测报警 Topic
 
 // MQTT 非阻塞重连最小间隔（毫秒）
 #define MQTT_RECONNECT_INTERVAL_MS  5000UL
