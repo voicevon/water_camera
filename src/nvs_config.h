@@ -42,3 +42,12 @@ bool nvs_set_mutation_enable(bool val);
 bool nvs_set_mutation_interval_sec(int val);
 bool nvs_set_mutation_block_thresh(float val);
 bool nvs_set_mutation_min_blocks(int val);
+
+/**
+ * @brief 拍照运行模式与定时间隔 Getter / Setter (支持断电持久化)
+ */
+String get_photo_mode();
+int    get_photo_interval_sec();
+bool   nvs_set_photo_mode(const String& val);
+bool   nvs_set_photo_interval_sec(int val);
+
