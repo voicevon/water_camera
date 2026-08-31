@@ -26,31 +26,32 @@
 | **Topic** | `water/photo/take` |
 | **QoS** | 0（默认，Best Effort） |
 | **Payload 类型** | JSON 字符串 |
-| **Payload 字段** | `site_name`（目标站点名称）<br>`mode`（拍照方式：`once`/`interval`/`motion`）<br>`interval`（间隔秒数，仅 `interval` 模式下生效） |
+| **Payload 字段** | `site_name`（目标站点名称）<br>`action`（即时动作：`capture`）<br>`mode`（常驻模式：`once`/`interval`/`motion`）<br>`interval`（间隔秒数，仅 `interval` 模式下生效） |
 
-#### Payload 字段与拍照方式说明
+#### Payload 字段与说明
 
 | 字段 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
 | `site_name` | String | 是 | 目标站点名称，例如 `"dongzhan"` |
-| `mode` | String | 是 | 拍照方式，支持以下三种模式：<br>1. `"once"`：仅拍摄一张<br>2. `"interval"`：定时/间隔拍摄<br>3. `"motion"`：有物进入自动发送 |
+| `action` | String | 可选 | 即时动作。例如 `"capture"` 表示**立即拍一张照片并上传**，但不影响/修改相机的常驻工作模式 |
+| `mode` | String | 可选 | 切换常驻工作模式并写入 NVS：<br>1. `"once"`：手动单次模式<br>2. `"interval"`：定时/间隔拍摄<br>3. `"motion"`：有物进入自动发送 |
 | `interval` | Integer | 条件必填 | 间隔时间（单位：**秒**，例如 `10`、`50`），仅在 `mode` 为 `"interval"` 时生效 |
 
-**触发逻辑**：当收到的 JSON Payload 中的 `site_name` 与 `config.h` / NVS 中的 `STATION_NAME`（默认 `"dongzhan"`）完全匹配时，设备才会执行对应指令。不匹配或格式错误的 Payload 将被静默忽略，支持多台相机混布于同一 Broker 而互不干扰。
+**触发逻辑**：当收到的 JSON Payload 中的 `site_name` 与 `config.h` / NVS 中的 `STATION_NAME`（默认 `"dongzhan"`）完全匹配时，设备才会执行对应指令。不匹配或格式错误的 Payload 将被静默忽略。
 
 **示例（MQTTX / mosquitto）**：
 
-- **单次拍摄**：
+- **即时拍一张（不改变常驻模式）**：
   ```bash
-  mosquitto_pub -h voicevon.vicp.io -t "water/photo/take" -m '{"site_name":"dongzhan","mode":"once"}'
+  mosquitto_pub -h voicevon.vicp.io -t "water/photo/take" -m '{"site_name":"dongzhan","action":"capture"}'
   ```
 
-- **定时/间隔拍摄（如每 10 秒拍一次）**：
+- **切换为 10 秒定时拍摄模式**：
   ```bash
   mosquitto_pub -h voicevon.vicp.io -t "water/photo/take" -m '{"site_name":"dongzhan","mode":"interval","interval":10}'
   ```
 
-- **有物进入自动发送**：
+- **切换为有物进入自动发送模式**：
   ```bash
   mosquitto_pub -h voicevon.vicp.io -t "water/photo/take" -m '{"site_name":"dongzhan","mode":"motion"}'
   ```

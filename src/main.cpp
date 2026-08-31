@@ -51,7 +51,7 @@ void trigger_photo_capture() {
 }
 
 // ============================================================
-//  MQTT 命令接收回调（JSON 解析与模式处理）
+//  MQTT 命令接收回调（JSON 解析：Action 与 Mode 分离处理）
 // ============================================================
 void mqtt_callback(char* topic, byte* payload, unsigned int length) {
     Serial.printf("[MQTT RX] Topic: %s\n", topic);
@@ -65,17 +65,30 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
         }
 
         const char* site_name = doc["site_name"];
-        const char* mode_str  = doc["mode"];
-
-        if (!site_name || !mode_str) {
-            Serial.println("[MQTT RX] Invalid JSON structure. 'site_name' and 'mode' are required.");
+        if (!site_name) {
+            Serial.println("[MQTT RX] Invalid JSON structure: missing 'site_name'.");
             return;
         }
 
-        Serial.printf("[MQTT RX] Parsed site_name: \"%s\", mode: \"%s\"\n", site_name, mode_str);
-
         // 比对 Payload 是否与自身站点名称一致
-        if (get_station_name().equals(site_name)) {
+        if (!get_station_name().equals(site_name)) {
+            Serial.printf("[MQTT RX] Station mismatch! Target: \"%s\", Local: \"%s\". Ignored.\n",
+                          site_name, get_station_name().c_str());
+            return;
+        }
+
+        // 1. 处理即时动作 (action="capture")，不修改长期工作模式
+        if (doc.containsKey("action")) {
+            const char* action_str = doc["action"];
+            if (strcmp(action_str, "capture") == 0) {
+                Serial.println("[MQTT RX] Action 'capture' received: Triggering immediate photo capture!");
+                trigger_photo_capture();
+            }
+        }
+
+        // 2. 处理工作模式设置 (mode) 并在 NVS 中持久化保存
+        if (doc.containsKey("mode")) {
+            const char* mode_str = doc["mode"];
             String mode_s = String(mode_str);
             if (mode_s == "interval") {
                 int interval = doc["interval"] | get_photo_interval_sec();
@@ -85,21 +98,17 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
                 s_shooting_mode = MODE_INTERVAL;
                 s_last_interval_photo_ms = millis();
                 Serial.printf("[MQTT RX] Switched to INTERVAL mode (interval: %ds, saved to NVS)\n", interval);
-                trigger_photo_capture(); // 切换模式时立即拍照一张
+                trigger_photo_capture();
             } else if (mode_s == "motion") {
                 nvs_set_photo_mode("motion");
                 s_shooting_mode = MODE_MOTION;
                 Serial.println("[MQTT RX] Switched to MOTION mode (object entry detection, saved to NVS)");
-            } else {
-                // "once" 或其他未知字符串默认为 ONCE
+            } else if (mode_s == "once") {
                 nvs_set_photo_mode("once");
                 s_shooting_mode = MODE_ONCE;
-                Serial.println("[MQTT RX] Executing ONCE mode capture (saved to NVS)");
+                Serial.println("[MQTT RX] Switched to ONCE mode (saved to NVS)");
                 trigger_photo_capture();
             }
-        } else {
-            Serial.printf("[MQTT RX] Station name mismatch! Target: \"%s\", Local: \"%s\". Ignored.\n",
-                          site_name, get_station_name().c_str());
         }
     }
 }
