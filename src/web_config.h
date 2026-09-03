@@ -13,39 +13,5 @@ void web_config_init();
  */
 void web_config_loop();
 
-/**
- * @brief 获取外部 Wi-Fi 的 SSID 配置
- */
-String get_sta_ssid();
-
-/**
- * @brief 获取外部 Wi-Fi 的 Password 配置
- */
-String get_sta_password();
-
-/**
- * @brief 获取闪光灯预热时间 (单位：秒，支持小数例如 0.8)
- */
-float get_warmup_sec();
-
-/**
- * @brief 从 NVS 获取最低环境亮度阈值 (0-255，低于此值下次自动开闪光灯)
- */
-int get_brightness_thresh();
-
-/**
- * @brief 从 NVS 获取配置的站点名称 (STATION_NAME)
- */
-String get_station_name();
-
-/**
- * @brief 从 NVS 获取配置的 MQTT Broker 地址
- */
-String get_mqtt_broker();
-
-/**
- * @brief 从 NVS 获取配置的 MQTT Broker 端口
- */
-int get_mqtt_port();
-
 #endif // WEB_CONFIG_H
+

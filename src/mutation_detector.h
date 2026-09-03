@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include "esp_camera.h"
+#include "config.h"
 
 // ============================================================
 //  常量定义
@@ -9,7 +10,6 @@
 #define MD_GRID_W        8     // 水平方向网格数
 #define MD_GRID_H        8     // 垂直方向网格数
 #define MD_GRID_COUNT    64    // 总网格数 (8×8)
-#define MD_WINDOW_SIZE   20    // 滑动窗口容量（帧数）
 
 // ============================================================
 //  MutationDetector 类
@@ -28,7 +28,7 @@ public:
      *
      * @param fb  来自 camera.capture() 的帧缓冲指针
      * @return    true = 本帧判定为局部突变并已发送 MQTT 报警
-     *            false = 无突变、全局光变或预热期
+     *            false = 无突变、全局光变、冷却期中或预热期
      */
     bool processFrame(camera_fb_t* fb);
 
@@ -39,6 +39,14 @@ public:
     uint32_t getLastUpdateMs() const { return _last_update_ms; }
     uint32_t getLastAlarmMs() const { return _last_alarm_ms; }
 
+    // 冷却状态查询接口
+    bool     isInCooldown() const;
+    uint32_t getCooldownRemainingSec() const;
+
+    // 冷却时间配置（秒）
+    void     setCooldownSec(uint32_t sec) { _cooldown_sec = sec; }
+    uint32_t getCooldownSec() const       { return _cooldown_sec; }
+
 private:
     // 最近一帧的调试监控数据
     float    _last_y_global;
@@ -47,15 +55,15 @@ private:
     uint32_t _last_update_ms;
     uint32_t _last_alarm_ms;
 
-    // 滑动窗口：存储历史帧各网格的归一化 RGB 特征（3 通道）
-    float _window[MD_WINDOW_SIZE][MD_GRID_COUNT][3];
+    // 冷却管理
+    uint32_t _cooldown_sec;       // 报警后冷却时长（秒）
+    uint32_t _cooldown_until_ms;  // 冷却截止时间戳（millis）
 
-    // 环形缓冲写指针与已积累帧计数
-    int   _write_idx;
-    int   _frame_count;
+    // 帧计数（用于开机预热识别）
+    int      _frame_count;
 
-    // 各网格移动均值（预计算，随窗口更新同步刷新）
-    float _mu[MD_GRID_COUNT][3];
+    // 各网格基准均值（EMA 跟踪，无庞大历史数组）
+    float    _mu[MD_GRID_COUNT][3];
 
     /**
      * @brief 从 JPEG fb 解码并降采样，填充 8×8 RGB888 网格均值数组
@@ -67,11 +75,19 @@ private:
     bool _decodeGrid(camera_fb_t* fb, float grid_rgb[MD_GRID_COUNT][3]);
 
     /**
-     * @brief 将新帧归一化特征存入滑动窗口，并重新计算 _mu
+     * @brief 使用 EMA 更新各网格基准均值
      *
      * @param norm_rgb  新帧各网格归一化特征，大小 MD_GRID_COUNT × 3
+     * @param alpha     更新权重系数 (0.0~1.0)
      */
-    void _updateWindow(float norm_rgb[MD_GRID_COUNT][3]);
+    void _updateEMA(float norm_rgb[MD_GRID_COUNT][3], float alpha);
+
+    /**
+     * @brief 突变报警触发后的快速吸纳：立即将当前网格特征吸收入基准，消除静止异物的二次误报
+     *
+     * @param norm_rgb  当前帧各网格归一化特征
+     */
+    void _fastAdapt(float norm_rgb[MD_GRID_COUNT][3]);
 };
 
 // 全局单例声明

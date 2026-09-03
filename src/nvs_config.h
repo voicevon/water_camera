@@ -9,6 +9,17 @@
 void nvs_config_init();
 
 /**
+ * @brief 系统配置 Getter（从内存缓存读取，实时生效）
+ *        声明集中在 nvs_config.h，实现在 nvs_config.cpp
+ */
+String get_sta_ssid();
+String get_sta_password();
+float  get_warmup_sec();
+String get_station_name();
+String get_mqtt_broker();
+int    get_mqtt_port();
+
+/**
  * @brief 配置写入接口 — 供 REST POST handler 调用
  *        各函数在值未变化时直接返回 false，跳过 NVS 写入
  *        返回值：true = 值已更新并写入 NVS；false = 无变化或非法值

@@ -5,6 +5,10 @@
 #define FACTORY_WIFI_SSID       "Perfect"
 #define FACTORY_WIFI_PASSWORD   "12344321"
 
+// -------- 软 AP 热点配置 --------
+#define AP_SSID         "AP_Camera"
+#define AP_PASSWORD     "12344321"
+
 // -------- MQTT Broker 配置 --------
 #define FACTORY_MQTT_BROKER     "voicevon.vicp.io"
 #define FACTORY_MQTT_PORT       1883
@@ -29,6 +33,11 @@
 
 // MQTT 非阻塞重连最小间隔（毫秒）
 #define MQTT_RECONNECT_INTERVAL_MS  5000UL
+
+// -------- 突变检测增强配置 --------
+#define DEFAULT_MUTATION_COOLDOWN_SEC  30    // 报警触发后的冷却保护时间（秒），避免静止异物/闪光灯AEC震荡重复拍照
+#define MUTATION_EMA_ALPHA             0.25f // EMA 日常平滑学习因子 (0.0~1.0)
+#define MUTATION_WARMUP_FRAMES         3     // 开机快速建立基线的预热帧数
 
 // -------- 闪光灯与亮度评估配置 --------
 #define FLASH_GPIO_NUM    4

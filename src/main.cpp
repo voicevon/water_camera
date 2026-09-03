@@ -54,19 +54,35 @@ void trigger_photo_capture() {
 //  MQTT 命令接收回调（JSON 解析：Action 与 Mode 分离处理）
 // ============================================================
 void mqtt_callback(char* topic, byte* payload, unsigned int length) {
-    Serial.printf("[MQTT RX] Topic: %s\n", topic);
+    // 构造安全的预览字符串（防止没有 '\0' 越界，同时限制最大 128 字节避免串口堵塞）
+    char preview_buf[128];
+    size_t copy_len = (length < sizeof(preview_buf) - 1) ? length : (sizeof(preview_buf) - 1);
+    if (payload && copy_len > 0) {
+        memcpy(preview_buf, payload, copy_len);
+    }
+    preview_buf[copy_len] = '\0';
+
+    Serial.printf("[MQTT RX] Topic: %s (len: %u, content: \"%s\"%s)\n",
+                  topic, length, preview_buf, (length >= sizeof(preview_buf) - 1) ? "..." : "");
+
     if (strcmp(topic, MQTT_CMD_TOPIC) == 0) {
+        if (length == 0) {
+            Serial.println("[MQTT RX] Ignored: Payload is empty.");
+            return;
+        }
+
         StaticJsonDocument<256> doc;
         DeserializationError err = deserializeJson(doc, payload, length);
         
         if (err) {
-            Serial.printf("[MQTT RX] JSON parse error: %s\n", err.c_str());
+            Serial.printf("[MQTT RX] JSON parse error: %s (Raw payload: \"%s\")\n",
+                          err.c_str(), preview_buf);
             return;
         }
 
         const char* site_name = doc["site_name"];
         if (!site_name) {
-            Serial.println("[MQTT RX] Invalid JSON structure: missing 'site_name'.");
+            Serial.printf("[MQTT RX] Invalid JSON structure: missing 'site_name' (Raw: \"%s\").\n", preview_buf);
             return;
         }
 
@@ -337,7 +353,7 @@ void loop() {
     if (is_online && !s_need_take_photo && !s_in_retry_mode) {
         unsigned long idle_interval_ms = (unsigned long)get_mutation_interval_sec() * 1000UL;
         if (now - s_last_photo_time_ms >= idle_interval_ms) {
-            Serial.printf("[Idle] Background evaluation photo... (%lud interval)\n", idle_interval_ms / 1000UL);
+            Serial.printf("[Idle] Background evaluation photo... (%lus interval)\n", idle_interval_ms / 1000UL);
 
             // 确保关闭闪光灯（评估拍摄强制不使用闪光灯）
             digitalWrite(FLASH_GPIO_NUM, LOW);

@@ -109,6 +109,8 @@ static void handle_get_mutation_status() {
     json += "\"y_global\":"  + String(mutationDetector.getLastYGlobal(), 1) + ",";
     json += "\"c_changed\":" + String(mutationDetector.getLastCChanged()) + ",";
     json += "\"alarm\":"     + String(mutationDetector.getLastAlarmStatus() ? "true" : "false") + ",";
+    json += "\"in_cooldown\":" + String(mutationDetector.isInCooldown() ? "true" : "false") + ",";
+    json += "\"cooldown_rem\":" + String(mutationDetector.getCooldownRemainingSec()) + ",";
     json += "\"alarm_topic\":\"" + escape_json_string(String(MQTT_ALARM_TOPIC) + "/" + get_station_name()) + "\",";
     
     uint32_t last_update = mutationDetector.getLastUpdateMs();
@@ -176,10 +178,11 @@ static void handle_wifi_scan() {
     }
 
     // 扫描成功完成 (status >= 0, 即 status 存储了扫描到的网络数)
-    int n = status;
+    const int MAX_SCAN_RESULTS = 32;
+    int n = (status > MAX_SCAN_RESULTS) ? MAX_SCAN_RESULTS : (int)status;
     String json = "{\"networks\":[";
     if (n > 0) {
-        int indices[n];
+        int indices[MAX_SCAN_RESULTS];
         for (int i = 0; i < n; i++) indices[i] = i;
         for (int i = 0; i < n - 1; i++) {
             for (int j = i + 1; j < n; j++) {
@@ -216,7 +219,7 @@ void web_config_init() {
 
     // 2. 启动 AP_STA 双模，开启软 AP 供配置接入
     WiFi.mode(WIFI_AP_STA);
-    WiFi.softAP("AP_Camera", "12344321");
+    WiFi.softAP(AP_SSID, AP_PASSWORD);
     Serial.printf("[WebConfig] SoftAP started. SSID: \"AP_Camera\", IP: %s\n",
                   WiFi.softAPIP().toString().c_str());
 
@@ -244,7 +247,7 @@ void web_config_loop() {
     if (WiFi.getMode() == WIFI_STA) {
         Serial.println("[WebConfig] WiFi mode was reverted to STA. Restoring AP_STA and restarting softAP...");
         WiFi.mode(WIFI_AP_STA);
-        WiFi.softAP("AP_Camera", "12344321");
+        WiFi.softAP(AP_SSID, AP_PASSWORD);
     }
     s_server.handleClient();
 }

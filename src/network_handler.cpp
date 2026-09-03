@@ -1,24 +1,29 @@
 #include "network_handler.h"
 #include <Arduino.h>
 #include "config.h"
-#include "web_config.h"
+#include "nvs_config.h"
 #include <atomic>
 
 // RAII Lock helper for thread-safe MQTT operations
 class MqttLock {
 public:
-    MqttLock(SemaphoreHandle_t mutex) : _mutex(mutex) {
+    MqttLock(SemaphoreHandle_t mutex) : _mutex(mutex), _locked(false) {
         if (_mutex) {
-            xSemaphoreTake(_mutex, portMAX_DELAY);
+            _locked = (xSemaphoreTake(_mutex, pdMS_TO_TICKS(3000)) == pdTRUE);
+            if (!_locked) {
+                Serial.println("[MQTT] WARN: MqttLock timeout (3s), skipping operation.");
+            }
         }
     }
     ~MqttLock() {
-        if (_mutex) {
+        if (_mutex && _locked) {
             xSemaphoreGive(_mutex);
         }
     }
+    bool locked() const { return _locked; }
 private:
     SemaphoreHandle_t _mutex;
+    bool _locked;
 };
 
 // 标准 DNS 解析：仅使用本地/ISP 默认 DNS 服务器
@@ -36,6 +41,9 @@ static IPAddress resolve_broker_ip() {
 }
 
 // 共享状态变量，用于后台异步 DNS 解析与 MQTT 连接任务
+// IPAddress 在 ESP32 上为 4 字节对齐，单次赋值可视为原子操作
+// 写入方：mqtt_connect_task（后台任务）；读取方：init()（仅启动时一次）
+// 如迁移到非 32-bit 平台需加锁保护
 static IPAddress s_resolved_broker_ip = IPAddress(0, 0, 0, 0);
 static std::atomic<bool> s_mqtt_connecting(false);
 static unsigned long s_last_dns_resolve_ms = 0;
@@ -184,14 +192,18 @@ void NetworkHandler::loop(unsigned long now) {
         bool connected = false;
         {
             MqttLock lock(_mqttMutex);
-            connected = _mqttClient.connected();
+            if (lock.locked()) {
+                connected = _mqttClient.connected();
+            }
         }
         
         if (!connected) {
             _reconnectMqtt(now);
         } else {
             MqttLock lock(_mqttMutex);
-            _mqttClient.loop();
+            if (lock.locked()) {
+                _mqttClient.loop();
+            }
         }
     }
 }
@@ -203,8 +215,8 @@ bool NetworkHandler::publishPhoto(const uint8_t* data, size_t len) {
         return false;
     }
     MqttLock lock(_mqttMutex);
-    if (!_mqttClient.connected()) {
-        Serial.println("[MQTT] Disconnected, skip publishing.");
+    if (!lock.locked() || !_mqttClient.connected()) {
+        Serial.println("[MQTT] Disconnected or lock timeout, skip publishing.");
         return false;
     }
 
@@ -242,8 +254,8 @@ bool NetworkHandler::publishText(const char* topic, const char* payload) {
         return false;
     }
     MqttLock lock(_mqttMutex);
-    if (!_mqttClient.connected()) {
-        Serial.println("[MQTT] publishText: Disconnected, skip.");
+    if (!lock.locked() || !_mqttClient.connected()) {
+        Serial.println("[MQTT] publishText: Disconnected or lock timeout, skip.");
         return false;
     }
     bool ok = _mqttClient.publish(topic, payload);
@@ -261,7 +273,7 @@ bool NetworkHandler::isConnected() {
         return false;
     }
     MqttLock lock(_mqttMutex);
-    return _mqttClient.connected();
+    return lock.locked() && _mqttClient.connected();
 }
 
 void NetworkHandler::processMqtt() {
@@ -270,7 +282,7 @@ void NetworkHandler::processMqtt() {
         return;
     }
     MqttLock lock(_mqttMutex);
-    if (_mqttClient.connected()) {
+    if (lock.locked() && _mqttClient.connected()) {
         _mqttClient.loop();
     }
 }
@@ -319,11 +331,11 @@ void NetworkHandler::_reconnectMqtt(unsigned long now) {
     
     _lastReconnectTime = now;
     
-    // 启动后台异步解析与连接任务，并捕获结果
+    // 先设置标志再创建任务，防止双核竞态：任务在另一核完成后主线程才执行赋值
+    s_mqtt_connecting = true;
     BaseType_t ret = xTaskCreate(mqtt_connect_task, "mqtt_conn", 8192, NULL, 1, NULL);
-    if (ret == pdPASS) {
-        s_mqtt_connecting = true; // 任务创建成功，立即加锁
-    } else {
+    if (ret != pdPASS) {
+        s_mqtt_connecting = false; // 任务创建失败，回退标志
         Serial.println("[MQTT] Error: Failed to create MQTT connection task!");
     }
 }
@@ -332,7 +344,7 @@ void NetworkHandler::_handleStatusLed(unsigned long now) {
     // 根据当前连接状态动态设定闪烁周期（占空比均为 50%）
     unsigned long period = 0;
     if (WiFi.status() == WL_CONNECTED) {
-        if (_mqttClient.connected()) {
+        if (!s_mqtt_connecting && _mqttClient.connected()) {
             period = 1000; // WiFi 与 MQTT 均连接成功：1 秒周期 (快闪)
         } else {
             period = 2000; // 仅 WiFi 连接成功：2 秒周期 (中速闪烁)
