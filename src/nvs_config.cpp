@@ -21,9 +21,6 @@ static const char NVS_KEY_MUT_EN[]      = "mut_enable";
 static const char NVS_KEY_MUT_INTVL[]   = "mut_interval";
 static const char NVS_KEY_MUT_THRESH[]  = "mut_thresh";
 static const char NVS_KEY_MUT_MBLK[]   = "mut_min_blk";
-// 拍照模式与间隔时间键名（均控制在 15 字节内）
-static const char NVS_KEY_PHOTO_MODE[]  = "photo_mode";
-static const char NVS_KEY_PHOTO_INTVL[] = "photo_intvl";
 
 // ============================================================
 //  配置项内存缓存（内部私有）
@@ -40,9 +37,6 @@ static bool   s_mut_enable        = true;
 static int    s_mut_interval_sec  = 10;
 static float  s_mut_block_thresh  = 0.15f;
 static int    s_mut_min_blocks    = 3;
-// 拍照模式与间隔时间缓存
-static String s_photo_mode        = "once";
-static int    s_photo_interval_sec = 10;
 
 // ============================================================
 //  NVS 初始化
@@ -62,16 +56,13 @@ void nvs_config_init() {
     s_mut_interval_sec = s_prefs.getInt(NVS_KEY_MUT_INTVL,  10);
     s_mut_block_thresh = s_prefs.getFloat(NVS_KEY_MUT_THRESH, 0.15f);
     s_mut_min_blocks   = s_prefs.getInt(NVS_KEY_MUT_MBLK,   3);
-    // 拍照模式与间隔参数
-    s_photo_mode        = s_prefs.getString(NVS_KEY_PHOTO_MODE, "once");
-    s_photo_interval_sec = s_prefs.getInt(NVS_KEY_PHOTO_INTVL, 10);
 
     s_prefs.end(); // 加载完立即释放句柄
 
-    Serial.printf("[NvsConfig] Loaded SSID: %s, Station: %s, Broker: %s:%d, PhotoMode: %s, PhotoIntvl: %ds\n",
+    Serial.printf("[NvsConfig] Loaded SSID: %s, Station: %s, Broker: %s:%d, Mutation: %s\n",
                   s_sta_ssid.c_str(), s_sta_name.c_str(),
                   s_mqtt_broker.c_str(), s_mqtt_port,
-                  s_photo_mode.c_str(), s_photo_interval_sec);
+                  s_mut_enable ? "ON" : "OFF");
 }
 
 // ============================================================
@@ -200,32 +191,4 @@ bool nvs_set_mutation_min_blocks(int val) {
     return true;
 }
 
-// ============================================================
-//  拍照运行模式与间隔 Getter / Setter
-// ============================================================
-String get_photo_mode() {
-    return s_photo_mode;
-}
-
-int get_photo_interval_sec() {
-    return s_photo_interval_sec;
-}
-
-bool nvs_set_photo_mode(const String& val) {
-    if (val.length() == 0 || val == s_photo_mode) return false;
-    s_photo_mode = val;
-    s_prefs.begin(NVS_NAMESPACE, false);
-    s_prefs.putString(NVS_KEY_PHOTO_MODE, val);
-    s_prefs.end();
-    return true;
-}
-
-bool nvs_set_photo_interval_sec(int val) {
-    if (val < 1 || val > 86400 || val == s_photo_interval_sec) return false;
-    s_photo_interval_sec = val;
-    s_prefs.begin(NVS_NAMESPACE, false);
-    s_prefs.putInt(NVS_KEY_PHOTO_INTVL, val);
-    s_prefs.end();
-    return true;
-}
 

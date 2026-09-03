@@ -43,18 +43,62 @@ static const char INDEX_HTML[] PROGMEM = R"rawhtml(
         }
 
         header {
-            text-align: center;
             margin-bottom: 1.25rem;
         }
 
-        header h1 {
-            font-size: 1.4rem;
+        .header-main {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.35rem;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .header-main h1 {
+            font-size: 1.25rem;
             font-weight: 700;
             letter-spacing: 0.5px;
             background: linear-gradient(135deg, var(--accent-blue), #06B6D4);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            margin-bottom: 0.35rem;
+        }
+
+        .status-dots {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            background: rgba(0, 0, 0, 0.3);
+            padding: 0.3rem 0.65rem;
+            border-radius: 20px;
+            border: 1px solid var(--border-color);
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            background: #64748B;
+            transition: all 0.3s ease;
+        }
+
+        .dot.on {
+            background: #10B981;
+            box-shadow: 0 0 8px #10B981;
+        }
+
+        .dot.off {
+            background: #EF4444;
+            box-shadow: 0 0 4px #EF4444;
         }
 
         header p {
@@ -250,8 +294,14 @@ static const char INDEX_HTML[] PROGMEM = R"rawhtml(
 
     <div class="container">
         <header>
-            <h1>智能相机节点配置</h1>
-            <p>AP+STA 双模在线管理控制面板</p>
+            <div class="header-main">
+                <h1>📷 水质监控相机节点</h1>
+                <div class="status-dots">
+                    <span class="status-indicator"><span class="dot" id="dot-wifi"></span>WiFi</span>
+                    <span class="status-indicator"><span class="dot" id="dot-mqtt"></span>MQTT</span>
+                </div>
+            </div>
+            <p>ESP32-CAM 实时采集与图像突变检测终端</p>
         </header>
 
         <!-- 顶部导航 Tabs -->
@@ -394,9 +444,8 @@ static const char INDEX_HTML[] PROGMEM = R"rawhtml(
         </div>
 
         <div class="footer">
-            <p>设备型号: Water Camera Node (ESP32-CAM)</p>
-            <p>版本信息: Version 2.0 Multi-Tab (2026年8月)</p>
-            <p>版权所有 © 山东卷烟厂 &amp; 技术支持：山东卷积分公司</p>
+            <p>版本: Version 2.0</p>
+            <p>版权所有: 山东卷积分公司</p>
         </div>
     </div>
 
@@ -623,7 +672,22 @@ static const char INDEX_HTML[] PROGMEM = R"rawhtml(
             }
         }
 
-        window.onload = fetchConfig;
+        async function updateNetworkStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                const wifiDot = document.getElementById('dot-wifi');
+                const mqttDot = document.getElementById('dot-mqtt');
+                if (wifiDot) wifiDot.className = 'dot ' + (data.wifi_connected ? 'on' : 'off');
+                if (mqttDot) mqttDot.className = 'dot ' + (data.mqtt_connected ? 'on' : 'off');
+            } catch (err) {}
+        }
+
+        window.onload = () => {
+            fetchConfig();
+            updateNetworkStatus();
+            setInterval(updateNetworkStatus, 3000);
+        };
     </script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 #include "web_config.h"
 #include "nvs_config.h"
 #include "mutation_detector.h"
+#include "network_handler.h"
 #include "index_html.h"
 #include "config.h"
 #include <WiFi.h>
@@ -34,6 +35,20 @@ static String escape_json_string(const String& input) {
         }
     }
     return output;
+}
+
+// GET /api/status — 返回网络及 MQTT 连接状态
+static void handle_get_status() {
+    bool wifi_ok = (WiFi.status() == WL_CONNECTED);
+    bool mqtt_ok = network.isConnected();
+    String json = "{";
+    json += "\"wifi_connected\":" + String(wifi_ok ? "true" : "false") + ",";
+    json += "\"mqtt_connected\":" + String(mqtt_ok ? "true" : "false") + ",";
+    json += "\"ssid\":\"" + escape_json_string(wifi_ok ? WiFi.SSID() : "") + "\",";
+    json += "\"ip\":\"" + (wifi_ok ? WiFi.localIP().toString() : "") + "\",";
+    json += "\"rssi\":" + String(wifi_ok ? WiFi.RSSI() : 0);
+    json += "}";
+    s_server.send(200, "application/json", json);
 }
 
 // GET /api/sysconfig — 返回系统配置 JSON
@@ -227,6 +242,7 @@ void web_config_init() {
     s_server.on("/", HTTP_GET, []() {
         s_server.send_P(200, "text/html", INDEX_HTML);
     });
+    s_server.on("/api/status",    HTTP_GET,  handle_get_status);
     s_server.on("/api/sysconfig", HTTP_GET,  handle_get_sysconfig);
     s_server.on("/api/sysconfig", HTTP_POST, handle_post_sysconfig);
     s_server.on("/api/wifi",      HTTP_GET,  handle_get_sysconfig);   // 兼容旧接口

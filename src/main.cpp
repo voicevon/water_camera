@@ -7,16 +7,6 @@
 #include "nvs_config.h"
 #include "mutation_detector.h"
 
-// 拍照模式枚举
-enum ShootingMode {
-    MODE_ONCE,      // 单次拍照模式
-    MODE_INTERVAL,  // 定时/间隔拍摄模式
-    MODE_MOTION     // 有物进入自动发送模式
-};
-
-static ShootingMode s_shooting_mode = MODE_ONCE;
-static unsigned long s_last_interval_photo_ms = 0;
-
 // 异步拍照任务与重试状态机控制变量
 static bool s_need_take_photo = false;
 static bool s_in_retry_mode = false;
@@ -28,20 +18,6 @@ static bool s_use_flash_next_time = false;          // 下一次常规拍摄是�
 
 const unsigned long RETRY_INTERVAL_MS = 10000UL; // 10秒重试间隔
 const int MAX_RETRY_ATTEMPTS = 3;               // 最多重试3次
-
-static ShootingMode string_to_mode(const String& mode_str) {
-    if (mode_str == "interval") return MODE_INTERVAL;
-    if (mode_str == "motion")   return MODE_MOTION;
-    return MODE_ONCE;
-}
-
-static const char* mode_to_string(ShootingMode mode) {
-    switch (mode) {
-        case MODE_INTERVAL: return "interval";
-        case MODE_MOTION:   return "motion";
-        default:            return "once";
-    }
-}
 
 // 统一触发拍照与重载状态的辅助函数
 void trigger_photo_capture() {
@@ -93,7 +69,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
             return;
         }
 
-        // 1. 处理即时动作 (action="capture")，不修改长期工作模式
+        // 1. 处理即时动作 (action="capture")
         if (doc.containsKey("action")) {
             const char* action_str = doc["action"];
             if (strcmp(action_str, "capture") == 0) {
@@ -102,29 +78,20 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
             }
         }
 
-        // 2. 处理工作模式设置 (mode) 并在 NVS 中持久化保存
-        if (doc.containsKey("mode")) {
-            const char* mode_str = doc["mode"];
-            String mode_s = String(mode_str);
-            if (mode_s == "interval") {
-                int interval = doc["interval"] | get_photo_interval_sec();
-                if (interval < 1) interval = 1;
-                nvs_set_photo_interval_sec(interval);
-                nvs_set_photo_mode("interval");
-                s_shooting_mode = MODE_INTERVAL;
-                s_last_interval_photo_ms = millis();
-                Serial.printf("[MQTT RX] Switched to INTERVAL mode (interval: %ds, saved to NVS)\n", interval);
-                trigger_photo_capture();
-            } else if (mode_s == "motion") {
-                nvs_set_photo_mode("motion");
-                s_shooting_mode = MODE_MOTION;
-                Serial.println("[MQTT RX] Switched to MOTION mode (object entry detection, saved to NVS)");
-            } else if (mode_s == "once") {
-                nvs_set_photo_mode("once");
-                s_shooting_mode = MODE_ONCE;
-                Serial.println("[MQTT RX] Switched to ONCE mode (saved to NVS)");
-                trigger_photo_capture();
+        // 2. 处理异物侵入检测开关 (motion="on"/"off" 或 true/false)
+        if (doc.containsKey("motion")) {
+            bool enable = false;
+            if (doc["motion"].is<bool>()) {
+                enable = doc["motion"].as<bool>();
+            } else {
+                const char* m_str = doc["motion"];
+                if (m_str && (strcmp(m_str, "on") == 0 || strcmp(m_str, "true") == 0 || strcmp(m_str, "enable") == 0)) {
+                    enable = true;
+                }
             }
+            nvs_set_mutation_enable(enable);
+            Serial.printf("[MQTT RX] Mutation detection switch updated: %s (saved to NVS)\n",
+                          enable ? "ON" : "OFF");
         }
     }
 }
@@ -202,12 +169,8 @@ void setup() {
     // 初始化 AP_STA 双模与 Web 配置服务器
     web_config_init();
 
-    // 加载开机恢复拍照模式与时间间隔
-    String mode_str = get_photo_mode();
-    s_shooting_mode = string_to_mode(mode_str);
-    s_last_interval_photo_ms = millis();
-    Serial.printf("[Boot] Restored photo mode from NVS: %s (Interval: %ds)\n",
-                  mode_to_string(s_shooting_mode), get_photo_interval_sec());
+    Serial.printf("[Boot] Mutation detection: %s\n",
+                  get_mutation_enable() ? "ENABLED" : "DISABLED");
 
     // 摄像头初始化成功后再初始化网络连接
     network.init();
@@ -255,10 +218,9 @@ void loop() {
     bool is_online = (WiFi.status() == WL_CONNECTED && network.isConnected());
 
     if (!is_online) {
-        // 断网时暂停空闲计时器与定时间隔计时器（顺延时间戳）
+        // 断网时暂停空闲计时器（顺延时间戳）
         unsigned long elapsed = now - s_last_loop_ms;
         s_last_photo_time_ms += elapsed;
-        s_last_interval_photo_ms += elapsed;
     }
     s_last_loop_ms = now;
 
@@ -296,7 +258,6 @@ void loop() {
             } else {
                 Serial.println("[Photo] Job succeeded!");
                 s_last_photo_time_ms = now; // 成功拍摄更新时间戳
-                s_last_interval_photo_ms = now; // 更新定时拍照时间戳
             }
         }
     }
@@ -317,39 +278,26 @@ void loop() {
                     Serial.println("[Photo] Retry job succeeded!");
                     s_in_retry_mode = false;
                     s_last_photo_time_ms = now; // 成功拍摄更新时间戳
-                    s_last_interval_photo_ms = now;
                 } else {
                     if (s_retry_count >= MAX_RETRY_ATTEMPTS) {
                         Serial.println("[Photo] All retry attempts failed. Aborting.");
                         s_in_retry_mode = false;
                         s_last_photo_time_ms = now; // 全部失败亦更新时间戳，避免立刻触发空闲评估
-                        s_last_interval_photo_ms = now;
                     }
                 }
             }
         }
     }
 
-    // 3. 处理 MODE_INTERVAL 模式下的周期性自动拍照
-    if (is_online && s_shooting_mode == MODE_INTERVAL && !s_need_take_photo && !s_in_retry_mode) {
-        unsigned long interval_ms = (unsigned long)get_photo_interval_sec() * 1000UL;
-        if (now - s_last_interval_photo_ms >= interval_ms) {
-            Serial.printf("[IntervalMode] %d seconds interval elapsed. Triggering auto capture...\n", get_photo_interval_sec());
-            trigger_photo_capture();
-        }
-    }
-
-    // 4. 开机 10 秒后的单次自检拍照上报（仅在模式为 ONCE 且未接收到其他模式指令时触发）
+    // 3. 开机 10 秒后的单次自检拍照上报
     static bool self_test_done = false;
     if (!self_test_done && now >= 10000) {
         self_test_done = true;
-        if (s_shooting_mode == MODE_ONCE) {
-            Serial.println("[SelfTest] 10s boot self-test: triggering first photo...");
-            trigger_photo_capture();
-        }
+        Serial.println("[SelfTest] 10s boot self-test: triggering first photo...");
+        trigger_photo_capture();
     }
 
-    // 5. 检查空闲状态以进行亮度评估与突变检测
+    // 4. 检查空闲状态以进行亮度评估与突变检测
     if (is_online && !s_need_take_photo && !s_in_retry_mode) {
         unsigned long idle_interval_ms = (unsigned long)get_mutation_interval_sec() * 1000UL;
         if (now - s_last_photo_time_ms >= idle_interval_ms) {
@@ -365,9 +313,9 @@ void loop() {
                 bool motion_detected = mutationDetector.processFrame(fb); // 突变检测
                 camera.release(fb);
 
-                // 在 MODE_MOTION 模式下，检测到有物进入自动触发拍照上报
-                if (motion_detected && s_shooting_mode == MODE_MOTION) {
-                    Serial.println("[MotionMode] Object entry detected! Triggering auto capture report...");
+                // 检测到有物侵入自动触发拍照上报
+                if (motion_detected) {
+                    Serial.println("[Mutation] Object entry detected! Triggering auto capture report...");
                     trigger_photo_capture();
                 }
             } else {

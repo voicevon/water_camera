@@ -26,34 +26,38 @@
 | **Topic** | `water/photo/take` |
 | **QoS** | 0（默认，Best Effort） |
 | **Payload 类型** | JSON 字符串 |
-| **Payload 字段** | `site_name`（目标站点名称）<br>`action`（即时动作：`capture`）<br>`mode`（常驻模式：`once`/`interval`/`motion`）<br>`interval`（间隔秒数，仅 `interval` 模式下生效） |
+| **Payload 字段** | `site_name`（目标站点名称）<br>`action`（即时动作：`capture`）<br>`motion`（异物侵入检测开关：`"on"` / `"off"` 或 `true` / `false`） |
 
 #### Payload 字段与说明
 
 | 字段 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `site_name` | String | 是 | 目标站点名称，例如 `"dongzhan"` |
-| `action` | String | 可选 | 即时动作。例如 `"capture"` 表示**立即拍一张照片并上传**，但不影响/修改相机的常驻工作模式 |
-| `mode` | String | 可选 | 切换常驻工作模式并写入 NVS：<br>1. `"once"`：手动单次模式<br>2. `"interval"`：定时/间隔拍摄<br>3. `"motion"`：有物进入自动发送 |
-| `interval` | Integer | 条件必填 | 间隔时间（单位：**秒**，例如 `10`、`50`），仅在 `mode` 为 `"interval"` 时生效 |
+| `site_name` | String | 是 | 目标站点名称，例如 `"dongzhan"`、`"home"` |
+| `action` | String | 可选 | 即时动作。`"capture"` 表示**立即拍摄一张照片并流式上传** |
+| `motion` | String / Boolean | 可选 | 异物侵入检测总开关（写入 NVS 持久化）：<br>• `"on"` 或 `true`：开启异物侵入检测（检测到突变主动报警拍照）<br>• `"off"` 或 `false`：关闭异物侵入检测（完全静默待命，仅响应拍照指令） |
+
+> **设计原则（动作与开关彻底解耦）**：
+> 1. 相机节点平时处于安静待命状态，收到 `action: "capture"` 立即拍照回传；
+> 2. 异物检测纯粹作为独立守护开关（`motion: on/off`），无需包装复杂的运行模式概念；
+> 3. 定时拍照调度职责完全属于 **Publisher（如手机客户端后台定时任务或云端服务）**，按需下发 `action: "capture"` 驱动。
 
 **触发逻辑**：当收到的 JSON Payload 中的 `site_name` 与 `config.h` / NVS 中的 `STATION_NAME`（默认 `"dongzhan"`）完全匹配时，设备才会执行对应指令。不匹配或格式错误的 Payload 将被静默忽略。
 
 **示例（MQTTX / mosquitto）**：
 
-- **即时拍一张（不改变常驻模式）**：
+- **即时拍一张（外部指令驱动）**：
   ```bash
   mosquitto_pub -h voicevon.vicp.io -t "water/photo/take" -m '{"site_name":"dongzhan","action":"capture"}'
   ```
 
-- **切换为 10 秒定时拍摄模式**：
+- **开启异物侵入检测**：
   ```bash
-  mosquitto_pub -h voicevon.vicp.io -t "water/photo/take" -m '{"site_name":"dongzhan","mode":"interval","interval":10}'
+  mosquitto_pub -h voicevon.vicp.io -t "water/photo/take" -m '{"site_name":"dongzhan","motion":"on"}'
   ```
 
-- **切换为有物进入自动发送模式**：
+- **关闭异物侵入检测**：
   ```bash
-  mosquitto_pub -h voicevon.vicp.io -t "water/photo/take" -m '{"site_name":"dongzhan","mode":"motion"}'
+  mosquitto_pub -h voicevon.vicp.io -t "water/photo/take" -m '{"site_name":"dongzhan","motion":"off"}'
   ```
 
 ---
