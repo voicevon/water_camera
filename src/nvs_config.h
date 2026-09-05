@@ -54,3 +54,8 @@ bool nvs_set_mutation_interval_sec(int val);
 bool nvs_set_mutation_block_thresh(float val);
 bool nvs_set_mutation_min_blocks(int val);
 
+/**
+ * @brief 将所有配置恢复为 config.h 定义的出厂默认值并持久化写入 NVS
+ */
+void nvs_reset_to_factory_defaults();
+

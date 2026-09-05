@@ -21,6 +21,7 @@ static const char NVS_KEY_MUT_EN[]      = "mut_enable";
 static const char NVS_KEY_MUT_INTVL[]   = "mut_interval";
 static const char NVS_KEY_MUT_THRESH[]  = "mut_thresh";
 static const char NVS_KEY_MUT_MBLK[]   = "mut_min_blk";
+static const char NVS_KEY_BUILD_TIME[]  = "bld_time";
 
 // ============================================================
 //  配置项内存缓存（内部私有）
@@ -39,25 +40,71 @@ static float  s_mut_block_thresh  = 0.15f;
 static int    s_mut_min_blocks    = 3;
 
 // ============================================================
+//  恢复出厂默认值并写入 NVS
+// ============================================================
+void nvs_reset_to_factory_defaults() {
+    Serial.println("[NvsConfig] Resetting and writing factory defaults to NVS...");
+
+    s_sta_ssid         = FACTORY_WIFI_SSID;
+    s_sta_password     = FACTORY_WIFI_PASSWORD;
+    s_warmup_sec       = 0.8f;
+    s_bright_thresh    = AMBIENT_BRIGHTNESS_THRESHOLD;
+    s_sta_name         = FACTORY_DEVICE_NAME;
+    s_mqtt_broker      = FACTORY_MQTT_BROKER;
+    s_mqtt_port        = FACTORY_MQTT_PORT;
+    s_mut_enable       = true;
+    s_mut_interval_sec = 10;
+    s_mut_block_thresh = 0.15f;
+    s_mut_min_blocks   = 3;
+
+    s_prefs.begin(NVS_NAMESPACE, false); // 读写模式
+    s_prefs.putString(NVS_KEY_SSID,          s_sta_ssid);
+    s_prefs.putString(NVS_KEY_PASS,          s_sta_password);
+    s_prefs.putFloat(NVS_KEY_WARMUP,         s_warmup_sec);
+    s_prefs.putInt(NVS_KEY_BRIGHT_THRESH,    s_bright_thresh);
+    s_prefs.putString(NVS_KEY_NAME,          s_sta_name);
+    s_prefs.putString(NVS_KEY_BROKER,        s_mqtt_broker);
+    s_prefs.putInt(NVS_KEY_PORT,             s_mqtt_port);
+    s_prefs.putBool(NVS_KEY_MUT_EN,          s_mut_enable);
+    s_prefs.putInt(NVS_KEY_MUT_INTVL,        s_mut_interval_sec);
+    s_prefs.putFloat(NVS_KEY_MUT_THRESH,     s_mut_block_thresh);
+    s_prefs.putInt(NVS_KEY_MUT_MBLK,         s_mut_min_blocks);
+    s_prefs.putString(NVS_KEY_BUILD_TIME,    __DATE__ " " __TIME__);
+    s_prefs.end();
+
+    Serial.println("[NvsConfig] Factory defaults successfully written to NVS.");
+}
+
+// ============================================================
 //  NVS 初始化
 // ============================================================
 void nvs_config_init() {
-    s_prefs.begin(NVS_NAMESPACE, true); // 只读模式加载参数
+    s_prefs.begin(NVS_NAMESPACE, false);
 
-    s_sta_ssid      = s_prefs.getString(NVS_KEY_SSID,          FACTORY_WIFI_SSID);
-    s_sta_password  = s_prefs.getString(NVS_KEY_PASS,          FACTORY_WIFI_PASSWORD);
-    s_warmup_sec    = s_prefs.getFloat(NVS_KEY_WARMUP,        0.8f);
-    s_bright_thresh = s_prefs.getInt(NVS_KEY_BRIGHT_THRESH,    AMBIENT_BRIGHTNESS_THRESHOLD);
-    s_sta_name      = s_prefs.getString(NVS_KEY_NAME,          FACTORY_DEVICE_NAME);
-    s_mqtt_broker  = s_prefs.getString(NVS_KEY_BROKER,   FACTORY_MQTT_BROKER);
-    s_mqtt_port    = s_prefs.getInt(NVS_KEY_PORT,        FACTORY_MQTT_PORT);
-    // 突变检测参数
-    s_mut_enable       = s_prefs.getBool(NVS_KEY_MUT_EN,    true);
-    s_mut_interval_sec = s_prefs.getInt(NVS_KEY_MUT_INTVL,  10);
-    s_mut_block_thresh = s_prefs.getFloat(NVS_KEY_MUT_THRESH, 0.15f);
-    s_mut_min_blocks   = s_prefs.getInt(NVS_KEY_MUT_MBLK,   3);
+    const char current_build[] = __DATE__ " " __TIME__;
+    String saved_build = s_prefs.getString(NVS_KEY_BUILD_TIME, "");
 
-    s_prefs.end(); // 加载完立即释放句柄
+    if (saved_build != current_build) {
+        Serial.printf("[NvsConfig] New firmware build detected (Saved: '%s' vs Current: '%s').\n",
+                      saved_build.c_str(), current_build);
+        s_prefs.end();
+        nvs_reset_to_factory_defaults();
+    } else {
+        Serial.printf("[NvsConfig] Firmware build unchanged ('%s'). Retaining existing config.\n",
+                      current_build);
+        s_sta_ssid         = s_prefs.getString(NVS_KEY_SSID,          FACTORY_WIFI_SSID);
+        s_sta_password     = s_prefs.getString(NVS_KEY_PASS,          FACTORY_WIFI_PASSWORD);
+        s_warmup_sec       = s_prefs.getFloat(NVS_KEY_WARMUP,        0.8f);
+        s_bright_thresh    = s_prefs.getInt(NVS_KEY_BRIGHT_THRESH,    AMBIENT_BRIGHTNESS_THRESHOLD);
+        s_sta_name         = s_prefs.getString(NVS_KEY_NAME,          FACTORY_DEVICE_NAME);
+        s_mqtt_broker      = s_prefs.getString(NVS_KEY_BROKER,   FACTORY_MQTT_BROKER);
+        s_mqtt_port        = s_prefs.getInt(NVS_KEY_PORT,        FACTORY_MQTT_PORT);
+        s_mut_enable       = s_prefs.getBool(NVS_KEY_MUT_EN,    true);
+        s_mut_interval_sec = s_prefs.getInt(NVS_KEY_MUT_INTVL,  10);
+        s_mut_block_thresh = s_prefs.getFloat(NVS_KEY_MUT_THRESH, 0.15f);
+        s_mut_min_blocks   = s_prefs.getInt(NVS_KEY_MUT_MBLK,   3);
+        s_prefs.end();
+    }
 
     Serial.printf("[NvsConfig] Loaded SSID: %s, Station: %s, Broker: %s:%d, Mutation: %s\n",
                   s_sta_ssid.c_str(), s_sta_name.c_str(),

@@ -2,7 +2,7 @@
 #define CONFIG_H
 
 // -------- WiFi 网络配置 --------
-#define FACTORY_WIFI_SSID       "Perfect"
+#define FACTORY_WIFI_SSID       "Juanjifen"
 #define FACTORY_WIFI_PASSWORD   "12344321"
 
 // -------- 软 AP 热点配置 --------
