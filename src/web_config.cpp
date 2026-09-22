@@ -74,6 +74,8 @@ static void handle_post_sysconfig() {
 
     if (changed) {
         Serial.println("[WebConfig] System configurations updated in NVS.");
+        // 立即应用新 WiFi 配置：无需等待下一轮重连或重启
+        WiFi.begin(get_sta_ssid().c_str(), get_sta_password().c_str());
     }
     s_server.send(200, "text/plain", "OK");
 }

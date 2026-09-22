@@ -9,6 +9,11 @@
 #define AP_SSID         "AP_Camera"
 #define AP_PASSWORD     "12344321"
 
+// STA 断线重连：基础间隔起指数退避（20s→40s→80s→160s→320s 封顶）。
+// 避免 STA 反复扫描占用射频导致 AP beacon 缺帧（AP 扫不到的直接原因）
+#define WIFI_RECONNECT_BASE_MS      20000UL
+#define WIFI_RECONNECT_BACKOFF_MAX_SHIFT 4
+
 // -------- MQTT Broker 配置 --------
 #define FACTORY_MQTT_BROKER     "voicevon.vicp.io"
 #define FACTORY_MQTT_PORT       1883

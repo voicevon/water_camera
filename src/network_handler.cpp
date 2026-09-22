@@ -45,6 +45,7 @@ static IPAddress resolve_broker_ip() {
 // 写入方：mqtt_connect_task（后台任务）；读取方：init()（仅启动时一次）
 // 如迁移到非 32-bit 平台需加锁保护
 static IPAddress s_resolved_broker_ip = IPAddress(0, 0, 0, 0);
+static String s_broker_domain; // MQTT 域名常驻副本（PubSubClient 只存指针，临时 String 会悬垂）
 static std::atomic<bool> s_mqtt_connecting(false);
 static unsigned long s_last_dns_resolve_ms = 0;
 
@@ -158,15 +159,15 @@ void NetworkHandler::init() {
     // 动态解析 MQTT Broker 的 IP，以应对本地 DNS 劫持或 DDNS IP 发生变更的问题
     IPAddress brokerIP = resolve_broker_ip();
     int port = get_mqtt_port();
-    String broker = get_mqtt_broker();
+    s_broker_domain = get_mqtt_broker(); // 常驻副本，防止 setServer 保存的指针悬垂
     if (brokerIP[0] != 0) {
         s_resolved_broker_ip = brokerIP; // 同步保存初始解析结果
         s_last_dns_resolve_ms = millis(); // 初始化解析时间戳
         _mqttClient.setServer(brokerIP, port);
         Serial.printf("[MQTT] Server set to resolved IP: %s:%d\n", brokerIP.toString().c_str(), port);
     } else {
-        _mqttClient.setServer(broker.c_str(), port);
-        Serial.printf("[MQTT] DNS resolution failed, fallback to domain: %s:%d\n", broker.c_str(), port);
+        _mqttClient.setServer(s_broker_domain.c_str(), port);
+        Serial.printf("[MQTT] DNS resolution failed, fallback to domain: %s:%d\n", s_broker_domain.c_str(), port);
     }
 
     // 申请 16KB 的 MQTT 缓冲区（由于长度 <= 32KB，将优先分配到内部高速 SRAM 中）
@@ -297,6 +298,9 @@ void NetworkHandler::_wifiInit() {
     Serial.printf("[WiFi] Target Password: \"%s\" (Length: %zu)\n", target_pass.c_str(), target_pass.length());
 
     Serial.print("[WiFi] Connecting to target network...");
+    // 关闭 SDK 内部自动重连：其后台高频全信道扫描会占用射频，
+    // 导致 AP beacon 缺帧、电脑扫不到热点。重连节奏由 _handleWifiReconnect 控制
+    WiFi.setAutoReconnect(false);
     WiFi.begin(target_ssid.c_str(), target_pass.c_str());
 
     int attempts = 0;
@@ -368,28 +372,37 @@ void NetworkHandler::_handleWifiReconnect(unsigned long now) {
     static unsigned long last_status_print = 0;
     static wl_status_t last_status = WL_NO_SHIELD;
     static unsigned long last_reconnect_attempt = 0;
-    
+    static uint8_t reconnect_fail_count = 0;
+
     wl_status_t current_status = WiFi.status();
-    
+
     if (current_status != last_status) {
-        Serial.printf("[WiFi] Status changed: %s -> %s\n", 
-                      wl_status_to_string(last_status), 
+        Serial.printf("[WiFi] Status changed: %s -> %s\n",
+                      wl_status_to_string(last_status),
                       wl_status_to_string(current_status));
         last_status = current_status;
     }
-    
+
     if (current_status != WL_CONNECTED) {
         if (now - last_status_print >= 10000) {
             last_status_print = now;
             Serial.printf("[WiFi Status Log] Currently disconnected. Status = %s\n", wl_status_to_string(current_status));
         }
-        
-        if (now - last_reconnect_attempt >= 20000) {
+
+        // 指数退避：失败越多间隔越长，退避窗口内射频安静，保证 AP 热点稳定广播
+        uint8_t shift = reconnect_fail_count < WIFI_RECONNECT_BACKOFF_MAX_SHIFT
+                        ? reconnect_fail_count : WIFI_RECONNECT_BACKOFF_MAX_SHIFT;
+        unsigned long interval = WIFI_RECONNECT_BASE_MS << shift;
+
+        if (now - last_reconnect_attempt >= interval) {
             last_reconnect_attempt = now;
-            Serial.println("[WiFi] Connection timeout, initiating begin() again...");
+            reconnect_fail_count++;
+            Serial.printf("[WiFi] Connection timeout, initiating begin() again (fail=%u, next in %lus)...\n",
+                          reconnect_fail_count, interval / 1000UL);
             WiFi.begin(get_sta_ssid().c_str(), get_sta_password().c_str());
         }
     } else {
         last_reconnect_attempt = now;
+        reconnect_fail_count = 0;
     }
 }
