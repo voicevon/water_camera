@@ -81,6 +81,19 @@ void mqtt_connect_task(void* pvParameters) {
             Serial.println("[MQTT Task] Connected successfully!");
             network._mqttClient.subscribe(MQTT_CMD_TOPIC);
             Serial.printf("[MQTT Task] Subscribed to topic: %s\n", MQTT_CMD_TOPIC);
+
+            // 统一控制平面主题订阅：water/{station}/control
+            String ctrl_topic = "water/" + get_station_name() + "/control";
+            network._mqttClient.subscribe(ctrl_topic.c_str());
+            Serial.printf("[MQTT Task] Subscribed to topic: %s\n", ctrl_topic.c_str());
+
+            // 发布上线就绪通知到控制响应主题
+            String resp_topic = "water/" + get_station_name() + "/control/response";
+            char boot_msg[128];
+            snprintf(boot_msg, sizeof(boot_msg),
+                     "{\"from\":\"camera\",\"event\":\"online\",\"status\":\"ready\",\"name\":\"%s\"}",
+                     get_station_name().c_str());
+            network._mqttClient.publish(resp_topic.c_str(), boot_msg);
         } else {
             Serial.printf("[MQTT Task] Connection failed, state = %d\n", network._mqttClient.state());
         }

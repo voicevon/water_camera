@@ -94,6 +94,53 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
                           enable ? "ON" : "OFF");
         }
     }
+
+    // 匹配统一控制主题：water/{station}/control
+    String station_ctrl_topic = "water/" + get_station_name() + "/control";
+    if (strcmp(topic, station_ctrl_topic.c_str()) == 0) {
+        if (length == 0) return;
+        StaticJsonDocument<256> doc;
+        DeserializationError err = deserializeJson(doc, payload, length);
+        if (err) {
+            Serial.printf("[MQTT Control RX] JSON parse error: %s\n", err.c_str());
+            return;
+        }
+
+        const char* target = doc["target"];
+        if (!target || (strcmp(target, "camera") != 0 && strcmp(target, "all") != 0)) {
+            Serial.printf("[MQTT Control] Ignored: target is not camera or all (target: %s)\n", target ? target : "null");
+            return;
+        }
+
+        const char* action = doc["action"];
+        if (action && strcmp(action, "restart") == 0) {
+            // 防死循环保护：若上电不足 15 秒，忽略重启指令
+            if (millis() < 15000UL) {
+                Serial.println("[MQTT Control] WARN: Ignoring restart command within 15s boot cooldown!");
+                return;
+            }
+
+            const char* cmd_id = doc["cmd_id"] | "";
+            Serial.printf("[MQTT Control] RESTART command accepted (cmd_id: %s)! Sending ACK...\n", cmd_id);
+
+            String resp_topic = "water/" + get_station_name() + "/control/response";
+            char ack_buf[256];
+            snprintf(ack_buf, sizeof(ack_buf),
+                     "{\"cmd_id\":\"%s\",\"from\":\"camera\",\"action\":\"restart\",\"status\":\"accept\",\"event\":\"restarting\",\"name\":\"%s\"}",
+                     cmd_id, get_station_name().c_str());
+            network.publishText(resp_topic.c_str(), ack_buf);
+
+            // 延迟 300ms 确保网络数据包完全送达网卡射频
+            delay(300);
+
+            Serial.println("[MQTT Control] Rebooting ESP32-CAM NOW...");
+            ESP.restart();
+            return;
+        } else if (action && strcmp(action, "capture") == 0) {
+            Serial.println("[MQTT Control] Action 'capture' received via control plane!");
+            trigger_photo_capture();
+        }
+    }
 }
 
 // ============================================================
